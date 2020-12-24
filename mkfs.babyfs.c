@@ -20,7 +20,7 @@ static void write_superblock(u_int64_t file_size) {
   struct baby_super_block *super_block = (struct baby_super_block *)block;
 
   // 填充数据
-  super_block->magic = 0x123456;                     // 魔数
+  super_block->magic = 0x1234;                     // 魔数
   super_block->nr_inodes = BABYFS_INODE_BLOCKS_NUM;  // inode 块数
   super_block->nr_istore_blocks =
       BABYFS_INODE_TABLE_BLOCK_BASE;  // inode 表起始块号
@@ -62,7 +62,7 @@ static void write_inode_table() {
   // CURRENT_TIME; 放到 fill_super 里面做
   root_inode->i_blocknum = 1;  // inode 对应文件占用的块数
   root_inode->i_nlink = 1;     // 硬链接计数
-
+  root_inode->i_mode = 0755 | S_IFDIR;
   // 写第一块 inode_table，里面包含了第一个 inode 和其他空的 inode
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   // count++;
