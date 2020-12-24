@@ -9,7 +9,7 @@
 
 static int fd;
 static int nr_dstore_blocks;  // 保存数据块起始块号
-static int count = 0;
+// static int count = 0;
 
 static void write_superblock(u_int64_t file_size) {
   u_int32_t total_blocks = file_size / BABYFS_BLOCK_SIZE;
@@ -33,7 +33,7 @@ static void write_superblock(u_int64_t file_size) {
           (BABYFS_BLOCK_SIZE << 3) +
       BABYFS_DATA_BIT_MAP_BLOCK_BASE;  // 数据块起始块号。简单起见，但是这样计算有一点误差
   nr_dstore_blocks = super_block->nr_dstore_blocks;
-  printf("nr_dstore_blocks: %d\n", nr_dstore_blocks);  //输出看一下
+  // printf("nr_dstore_blocks: %d\n", nr_dstore_blocks);  //输出看一下
   super_block->nr_blocks =
       total_blocks - super_block->nr_dstore_blocks;       // 数据块总块数
   super_block->nr_free_inodes = BABYFS_INODE_NUM_COUNTS;  // inode 剩余空闲数量
@@ -48,7 +48,7 @@ static void write_superblock(u_int64_t file_size) {
 
   free(block);
   printf("super block 格式化完成!\n");
-  count++;
+  // count++;
 }
 
 static void write_inode_table() {
@@ -65,7 +65,7 @@ static void write_inode_table() {
 
   // 写第一块 inode_table，里面包含了第一个 inode 和其他空的 inode
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
-  count++;
+  // count++;
   if (ret != BABYFS_BLOCK_SIZE) {
     perror("inode_table: 0, 写出错!\n");
     return;
@@ -74,7 +74,7 @@ static void write_inode_table() {
   // 写剩余的空的 inode_table block
   memset(block, 0, BABYFS_BLOCK_SIZE);  // 清空前面写 root_inode 的数据
   for (int i = 1; i < BABYFS_INODE_BLOCKS_NUM; ++i) {
-    count++;
+    // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
       fprintf(stderr, "inode_table: %d, 写出错!\n", i);
       return;
@@ -94,7 +94,7 @@ static void write_inode_bitmap() {
   // 设置第一个 inode（根目录） 为 0，表示已被占用
   *inode_bitmap = 0xfffffffffffffffe;
   int ret = write(fd, inode_bitmap, BABYFS_BLOCK_SIZE);
-  count++;
+  // count++;
   if (ret != BABYFS_BLOCK_SIZE) {
     perror("inode_bitmap: 0 写出错\n");
     return;
@@ -105,7 +105,7 @@ static void write_inode_bitmap() {
   for (int i = 1;
        i < BABYFS_INODE_TABLE_BLOCK_BASE - BABYFS_INODE_BIT_MAP_BLOCK_BASE;
        ++i) {
-    count++;
+    // count++;
     ret = write(fd, inode_bitmap,
                 BABYFS_BLOCK_SIZE);  // 文件指针每次写完会自动往下一个块大小
     if (ret != BABYFS_BLOCK_SIZE) {
@@ -126,8 +126,8 @@ static void write_datablock_bitmap() {
   // 标记 root_inode 使用的第一块数据块
   *data_bitmap = 0xfffffffffffffffe;
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
-  count++;
-  printf("write_datablock_bitmap: %d\n", count);
+  // count++;
+  // printf("write_datablock_bitmap: %d\n", count);
   if (ret != BABYFS_BLOCK_SIZE) {
     perror("data_block_bitmap: 0, 写出错!\n");
     return;
@@ -136,7 +136,7 @@ static void write_datablock_bitmap() {
   // 写剩余的 bitmap
   *data_bitmap = 0xffffffffffffffff;
   for (int i = 1; i < nr_dstore_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE; ++i) {
-    count++;
+    // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
       fprintf(stderr, "data_block_bitmap: %d, 写出错!\n", i);
       return;
@@ -219,7 +219,7 @@ int main(int argc, char **argv) {
   write_first_datablock();      // 主要是写根目录的目录项
 
   printf("格式化完成!\n");
-  printf("已初始化的块数: %d\n", count);
+  // printf("已初始化的块数: %d\n", count);
 
   close(fd);
   return EXIT_SUCCESS;
