@@ -2,6 +2,7 @@
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
 #include <linux/mm.h>
+#include <linux/blkdev.h>
 
 #include "babyfs.h"
 
@@ -40,7 +41,6 @@ static struct baby_inode *baby_get_raw_inode(struct super_block *sb, ino_t ino,
       ino / BABYFS_INODE_NUM_PER_BLOCK; // raw inode 所在磁盘块
   unsigned long offset = ino % BABYFS_INODE_NUM_PER_BLOCK; // 该 inode 是块内的第几个
   struct buffer_head *inode_block;
-  printk("baby_get_raw_inode, %lu, inode_block_no: %lu, offset: %lu\n",ino, inode_block_no, offset);
   if (!(inode_block = sb_bread(sb, inode_block_no))) {
     printk(
         "baby_get_raw_inode: unable to read inode block - inode_no=%lu, "
@@ -49,9 +49,6 @@ static struct baby_inode *baby_get_raw_inode(struct super_block *sb, ino_t ino,
     return NULL;
   }
   *bh = inode_block;
-  printk("inode_block_no: %lu, offset: %lu\n", inode_block_no, offset);
-  struct baby_inode *binode = ((struct baby_inode *)inode_block->b_data) + offset;
-  printk("i_nlink:%u ,imode: %u\n", le16_to_cpu(binode->i_nlink), le16_to_cpu(binode->i_mode));
 
   return ((struct baby_inode *)inode_block->b_data) + offset;
 }
@@ -79,7 +76,6 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   // 用读取的 raw inode初始化 vfs inode
   vfs_inode->i_private = raw_inode;
   vfs_inode->i_mode = le16_to_cpu(raw_inode->i_mode);
-  printk("i_mode:%u %u\n", vfs_inode->i_mode, le16_to_cpu(raw_inode->i_mode));
   i_uid = (uid_t)le16_to_cpu(raw_inode->i_uid);
   i_gid = (gid_t)le16_to_cpu(raw_inode->i_gid);
   i_uid_write(vfs_inode, i_uid);
@@ -114,26 +110,21 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
     printk(KERN_ERR "babyfs_fill_super: kalloc baby_sb_info failed!\n");
     goto failed;
   }
-  printk("kzalloc\n");
-  sb->s_blocksize = BABYFS_BLOCK_SIZE; // sb_bread 读取的逻辑块大小
+
+  if(!sb_set_blocksize(sb, BABYFS_BLOCK_SIZE)) { // 设置 sb_bread 读取的逻辑块大小
+    printk(KERN_ERR "sb_set_blocksize: failed! current blocksize: %lu\n", sb->s_blocksize);
+  }
+
   // 仅在初始化的时候读取超级块，后面只需要操作内存中的超级块对象，并在恰当的时候同步到磁盘
-  bh = sb_bread(sb, 0);
-  printk("sb bread 0!,%lu\n", bh->b_size);
-  bh = sb_bread(sb, 1);
-  printk("sb bread 1!\n");
-  bh = sb_bread(sb, 2);
   struct baby_inode *baby_inode = (struct baby_inode *)bh->b_data;
-  printk("i_nlink: %u\n", baby_inode->i_nlink);
   if(!(bh = sb_bread(sb, BABYFS_SUPER_BLOCK))) {
     printk(KERN_ERR "babyfs_fill_super: canot read super block\n");
     goto failed;
   }
-  printk("sb_bread super block\n");
   baby_sb = (struct baby_super_block *)bh->b_data;
 
   // 初始化超级块
   sb->s_magic = baby_sb->magic; // 魔幻数
-  printk("magic=%u\n", baby_sb->magic);
   sb->s_op = &babyfs_super_opts; // 操作集合
   baby_sb_info->s_babysb = baby_sb;
   baby_sb_info->s_sbh = bh;
@@ -145,7 +136,6 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
 		ret = PTR_ERR(root_vfs_inode);
 	  goto failed_mount;
 	}
-  printk("baby_iget\n");
   // 创建根目录
   sb->s_root = d_make_root(root_vfs_inode);
   if (!sb->s_root) {
@@ -153,7 +143,6 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
     ret = -ENOMEM;
     goto failed_mount;
   }
-  printk("success! root_vfs_inode->i_mode:%u\n", root_vfs_inode->i_mode);
   return 0;
 
 failed_mount:
@@ -173,8 +162,6 @@ static struct dentry *babyfs_mount(struct file_system_type *fs_type, int flags, 
 static void babyfs_put_super(struct super_block *sb) {
   struct baby_sb_info *baby_sb_info = BABY_SB(sb);
   if (baby_sb_info == NULL) {
-    printk("null!\n");
-
     return;
   }
   brelse(baby_sb_info->s_sbh);
