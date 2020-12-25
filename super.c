@@ -133,7 +133,7 @@ static void destroy_inodecache(void) {
   kmem_cache_destroy(baby_inode_cachep);
 }
 
-static void babyfs_put_super(struct super_block *sb) {
+static void baby_put_super(struct super_block *sb) {
   struct baby_sb_info *baby_sb_info = BABY_SB(sb);
   if (baby_sb_info == NULL) {
     return;
@@ -147,7 +147,8 @@ struct super_operations babyfs_super_opts = { // 自定义 super_block 操作集
   .statfs       = simple_statfs,        // 给出文件系统的统计信息，例如使用和未使用的数据块的数目，或者文件名的最大长度
   .alloc_inode	= baby_alloc_inode,     // 申请 inode
   .destroy_inode= baby_destroy_inode,   // 释放 inode
-  .put_super    = babyfs_put_super,     // 删除超级块实例的方法
+	.write_inode	= baby_write_inode,     // 将 inode 写到磁盘上
+  .put_super    = baby_put_super,       // 删除超级块实例的方法
 };
 
 static struct file_system_type baby_fs_type = { // 文件系统类型
