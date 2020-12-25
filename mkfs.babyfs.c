@@ -20,7 +20,7 @@ static void write_superblock(u_int64_t file_size) {
   struct baby_super_block *super_block = (struct baby_super_block *)block;
 
   // 填充数据
-  super_block->magic = 0x1234;                     // 魔数
+  super_block->magic = 0x1234;                       // 魔数
   super_block->nr_inodes = BABYFS_INODE_BLOCKS_NUM;  // inode 块数
   super_block->nr_istore_blocks =
       BABYFS_INODE_TABLE_BLOCK_BASE;  // inode 表起始块号
@@ -162,7 +162,7 @@ static void write_first_datablock() {
 
   // 添加 “..” 目录项
   d_record++;
-  memset(d_record->name, 0, sizeof(d_record->name));	//清空 name 字段
+  memset(d_record->name, 0, sizeof(d_record->name));  //清空 name 字段
   memcpy(d_record->name, "..", 2);
   d_record->inode_no =
       BABYFS_ROOT_INODE_NO;  // inode 编号为 0，这样可以通过 ino +

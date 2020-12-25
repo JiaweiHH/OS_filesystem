@@ -63,11 +63,6 @@ struct baby_super_block {
   __le32 nr_free_blocks;   /* 剩余空闲 data block 数量 */
 };
 
-struct baby_sb_info {
-  struct baby_super_block *s_babysb;
-  struct buffer_head *s_sbh;
-};
-
 // 磁盘索引节点
 struct baby_inode {
   __le16 i_mode;                    /* 文件类型和访问权限 */
@@ -94,3 +89,23 @@ struct dir_record {
   __u8 name_len;
   __u8 file_type;
 };
+
+#ifdef __KERNEL__
+
+struct baby_sb_info {
+  struct baby_super_block *s_babysb;
+  struct buffer_head *s_sbh;
+};
+
+/* inode.c */
+extern struct inode *baby_iget(struct super_block *, unsigned long);
+extern struct baby_inode *baby_get_raw_inode(struct super_block *, ino_t,
+                                             struct buffer_head **);
+extern void init_inode_operations(struct inode *, umode_t);
+
+/* 获取超级块 */
+static inline struct baby_sb_info *BABY_SB(struct super_block *sb){
+  return sb->s_fs_info;
+}
+
+#endif
