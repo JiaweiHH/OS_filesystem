@@ -25,48 +25,6 @@ void init_inode_operations(struct inode *inode, umode_t mode) {
   }
 }
 
-// 将磁盘中的 inode 读到内存，并新建与之关联的 vfs inode
-struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
-  struct baby_inode *raw_inode;
-  struct inode *vfs_inode;
-  struct buffer_head *bh = NULL;
-  long ret = -EIO;
-  uid_t i_uid;
-  gid_t i_gid;
-
-  vfs_inode = iget_locked(sb, ino);  // 分配一个加锁的 vfs inode
-  raw_inode = baby_get_raw_inode(sb, ino, &bh);  // 读磁盘的 inode
-  if (IS_ERR(raw_inode)) {
-    ret = PTR_ERR(raw_inode);
-    goto bad_inode;
-  }
-
-  // 用读取的 raw inode初始化 vfs inode
-  vfs_inode->i_private = raw_inode;
-  vfs_inode->i_mode = le16_to_cpu(raw_inode->i_mode);
-  i_uid = (uid_t)le16_to_cpu(raw_inode->i_uid);
-  i_gid = (gid_t)le16_to_cpu(raw_inode->i_gid);
-  i_uid_write(vfs_inode, i_uid);
-  i_gid_write(vfs_inode, i_gid);
-  set_nlink(vfs_inode, le16_to_cpu(raw_inode->i_nlink));
-  vfs_inode->i_size = le32_to_cpu(raw_inode->i_size);
-  vfs_inode->i_atime.tv_sec = (signed)le32_to_cpu(raw_inode->i_atime);
-  vfs_inode->i_ctime.tv_sec = (signed)le32_to_cpu(raw_inode->i_ctime);
-  vfs_inode->i_mtime.tv_sec = (signed)le32_to_cpu(raw_inode->i_mtime);
-  vfs_inode->i_atime.tv_nsec = vfs_inode->i_mtime.tv_nsec =
-      vfs_inode->i_ctime.tv_nsec = 0;
-  // 初始化操作集合
-  init_inode_operations(vfs_inode, vfs_inode->i_mode);
-
-  brelse(bh);
-  unlock_new_inode(vfs_inode);
-  return vfs_inode;
-
-bad_inode:
-  iget_failed(vfs_inode);
-  return ERR_PTR(ret);
-}
-
 // 由索引结点编号返回 inode 的磁盘块
 // 因为一个块可以存储多个 raw inode，ino 可以指定块内偏移
 struct baby_inode *baby_get_raw_inode(struct super_block *sb, ino_t ino,
@@ -87,4 +45,58 @@ struct baby_inode *baby_get_raw_inode(struct super_block *sb, ino_t ino,
   *bh = inode_block;
 
   return ((struct baby_inode *)inode_block->b_data) + offset;
+}
+
+// 将磁盘中的 inode 读到内存，并新建与之关联的 vfs inode
+struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
+  struct baby_inode *raw_inode;
+  struct inode *vfs_inode;
+  struct baby_inode_info *bbi;
+  struct buffer_head *bh = NULL;
+  long ret = -EIO;
+  uid_t i_uid;
+  gid_t i_gid;
+  int i;
+
+  vfs_inode = iget_locked(sb, ino);  // 分配一个加锁的 vfs inode
+  if (!vfs_inode)
+		return ERR_PTR(-ENOMEM);
+  bbi = BABY_I(vfs_inode);
+
+  raw_inode = baby_get_raw_inode(sb, ino, &bh);  // 读磁盘的 inode
+  if (IS_ERR(raw_inode)) {
+    ret = PTR_ERR(raw_inode);
+    goto bad_inode;
+  }
+
+  // 用读取的 raw inode初始化 vfs inode
+  vfs_inode->i_mode = le16_to_cpu(raw_inode->i_mode);
+  i_uid = (uid_t)le16_to_cpu(raw_inode->i_uid);
+  i_gid = (gid_t)le16_to_cpu(raw_inode->i_gid);
+  i_uid_write(vfs_inode, i_uid);
+  i_gid_write(vfs_inode, i_gid);
+  set_nlink(vfs_inode, le16_to_cpu(raw_inode->i_nlink));
+  vfs_inode->i_size = le32_to_cpu(raw_inode->i_size);
+  vfs_inode->i_atime.tv_sec = (signed)le32_to_cpu(raw_inode->i_atime);
+  vfs_inode->i_ctime.tv_sec = (signed)le32_to_cpu(raw_inode->i_ctime);
+  vfs_inode->i_mtime.tv_sec = (signed)le32_to_cpu(raw_inode->i_mtime);
+  vfs_inode->i_atime.tv_nsec = vfs_inode->i_mtime.tv_nsec =
+      vfs_inode->i_ctime.tv_nsec = 0;
+  
+  bbi->i_subdir_num = le16_to_cpu(raw_inode->i_subdir_num);
+  for (i = 0; i < BABYFS_N_BLOCKS; i++) { // 拷贝数据块索引数组
+    bbi->i_blocks[i] = raw_inode->i_blocks[i];
+  }
+  vfs_inode->i_private = bbi;
+  
+  // 初始化操作集合
+  init_inode_operations(vfs_inode, vfs_inode->i_mode);
+
+  brelse(bh);
+  unlock_new_inode(vfs_inode);
+  return vfs_inode;
+
+bad_inode:
+  iget_failed(vfs_inode);
+  return ERR_PTR(ret);
 }

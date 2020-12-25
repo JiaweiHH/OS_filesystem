@@ -74,9 +74,10 @@ struct baby_inode {
   __le32 i_mtime;                   /* i_mtime */
   __le32 i_blocknum;                /* 文件块数 */
   __le16 i_nlink;                   /* 硬链接计数 */
+  __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   __u8 _padding[(BABYFS_INODE_SIZE -
-                 (2 * 3 + 4 * 6 + 2))]; /* inode 结构体扩展到 128B */
+                 (2 * 3 + 4 * 6 + 2 + 2))]; /* inode 结构体扩展到 128B */
 };
 
 /*
@@ -97,6 +98,21 @@ struct baby_sb_info {
   struct buffer_head *s_sbh;
 };
 
+// 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
+struct baby_inode_info {
+  __le16 i_subdir_num;              /* 子目录项数量 */
+  __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
+  struct inode vfs_inode;
+};
+
+// 从 vfs inode 返回包含他的 baby_inode_info
+static inline struct baby_inode_info *BABY_I(struct inode *inode) {
+	return container_of(inode, struct baby_inode_info, vfs_inode);
+}
+
+/* dir.c */
+extern int baby_add_link(struct dentry *dentry, struct inode *inode);
+
 /* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);
 extern struct baby_inode *baby_get_raw_inode(struct super_block *, ino_t,
@@ -108,4 +124,10 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb){
   return sb->s_fs_info;
 }
 
+// 小端序位图操作方法
+#define baby_set_bit	__set_bit_le // set 1
+#define baby_clear_bit	__clear_bit_le // set 0
+#define baby_test_bit	test_bit_le
+#define baby_find_first_zero_bit find_first_zero_bit_le
+#define baby_find_next_zero_bit find_next_zero_bit_le
 #endif
