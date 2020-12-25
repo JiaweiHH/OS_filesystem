@@ -37,6 +37,7 @@
   (BABYFS_INODE_TABLE_BLOCK_BASE + BABYFS_INODE_BLOCKS_NUM)  // 数据位图起始块号
 
 #define BABYFS_FILENAME_MAX_LEN 250  // 文件名最大长度，为了目录项对齐到 256B
+#define BABYFS_DIR_RECORD_SIZE 256   // 目录项大小
 
 #define BABYFS_CURRENT_TIME (current_kernel_time())  // 当前系统时间
 #define BABYFS_FILE_TYPE_DIR 1
@@ -113,6 +114,7 @@ static inline struct baby_inode_info *BABY_I(struct inode *inode) {
 
 /* dir.c */
 extern int baby_add_link(struct dentry *dentry, struct inode *inode);
+extern const struct file_operations baby_dir_operations;
 
 /* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);
