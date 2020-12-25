@@ -18,18 +18,20 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   struct inode *root_vfs_inode;
   long ret = -ENOMEM;
 
-  if(!(baby_sb_info = kzalloc(sizeof(*baby_sb_info), GFP_KERNEL))) {
+  if (!(baby_sb_info = kzalloc(sizeof(*baby_sb_info), GFP_KERNEL))) {
     printk(KERN_ERR "babyfs_fill_super: kalloc baby_sb_info failed!\n");
     goto failed;
   }
 
-  if(!sb_set_blocksize(sb, BABYFS_BLOCK_SIZE)) { // 设置 sb_bread 读取的逻辑块大小
-    printk(KERN_ERR "sb_set_blocksize: failed! current blocksize: %lu\n", sb->s_blocksize);
+  if (!sb_set_blocksize(sb, BABYFS_BLOCK_SIZE)) { // 设置 sb_bread 读取的逻辑块大小
+    printk(KERN_ERR "sb_set_blocksize: failed! current blocksize: %lu\n",
+           sb->s_blocksize);
+    goto failed;
   }
 
   // 仅在初始化的时候读取超级块，后面只需要操作内存中的超级块对象，并在恰当的时候同步到磁盘
   struct baby_inode *baby_inode = (struct baby_inode *)bh->b_data;
-  if(!(bh = sb_bread(sb, BABYFS_SUPER_BLOCK))) {
+  if (!(bh = sb_bread(sb, BABYFS_SUPER_BLOCK))) {
     printk(KERN_ERR "babyfs_fill_super: canot read super block\n");
     goto failed;
   }
@@ -40,7 +42,7 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   sb->s_op = &babyfs_super_opts; // 操作集合
   baby_sb_info->s_babysb = baby_sb;
   baby_sb_info->s_sbh = bh;
-  sb->s_fs_info = baby_sb_info; // superblock 的私有域存放磁盘上的结构体
+  sb->s_fs_info = baby_sb_info; // superblock 的私有域存放额外信息，包括磁盘上的结构体
 
   // 获取磁盘存储的 inode 结构体
   root_vfs_inode = baby_iget(sb, BABYFS_ROOT_INODE_NO);
@@ -48,6 +50,7 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
 		ret = PTR_ERR(root_vfs_inode);
 	  goto failed_mount;
 	}
+
   // 创建根目录
   sb->s_root = d_make_root(root_vfs_inode);
   if (!sb->s_root) {
@@ -63,12 +66,13 @@ failed:
   return ret;
 }
 
-static struct dentry *babyfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data) {
-    // 在块设备上挂载文件系统
-    struct dentry *dentry = mount_bdev(fs_type, flags, dev_name, data, babyfs_fill_super);
-    if(!dentry)
-        printk(KERN_ERR "babyfs_mount: mounted error\n");
-    return dentry;
+static struct dentry *babyfs_mount(struct file_system_type *fs_type, int flags,
+                                   const char *dev_name, void *data) {
+  // 在块设备上挂载文件系统
+  struct dentry *dentry =
+      mount_bdev(fs_type, flags, dev_name, data, babyfs_fill_super);
+  if (!dentry) printk(KERN_ERR "babyfs_mount: mounted error\n");
+  return dentry;
 }
 
 static void babyfs_put_super(struct super_block *sb) {

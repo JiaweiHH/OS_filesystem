@@ -13,30 +13,37 @@ cat /proc/filesystem
 make uninstall
 
 # 支持挂载文件系统，查看状态
-# 生成测试文件
-dd if=/dev/zero of=test.img bs=1M count=50
-make mkfs
-./mkfs.babyfs test.img
-# 下列命令封装挂载命令 sudo mount -t my none /mnt
+# 生成测试文件并格式化
+make mkimg
+# 挂载文件系统
 make mount
 # 可用以下命令查看挂载的文件系统
 mount
 stat -f /mnt
 stat /mnt
-# 下列命令封装卸载文件系统命令 sudo umount /mnt
+# 卸载文件系统
 make umount
 ```
 ## 设计
 
 ## 实现过程
 
-mkfs.babyfs
+### mkfs.babyfs
 
 1. 创建 `super_block`，填充数据并写到设备文件上。计算数据块开始的 block，`nr_dstore_blocks`
 2. 写 `inode_bitmap`，第一个 64bit 设置为 `0xfffffffffffffffe`，其余的都是 `0xffffffffffffffff`。0 表示占用，1 表示空闲
 3. 写 `inode_table`。创建 `root_inode` 并填充数据，写到 inode block。此时还没有分配数据块给这个 inode
 4. 写 `datablock_bitmap`，第一个 64bit 设置为 `0xfffffffffffffffe`，等会要给 `root_inode` 分配一个目录块填充目录项，其余的也是 `0xffffffffffffffff`。0 表示占用，1 表示空   闲
 5. 写 `first_block`，往里面添加 "." 和 ".." `目录项`，设置 `root_inode->i_blocks` 索引数组
+
+### mount
+
+借助 vfs 提供的 `mount_bdev` 方法挂载块设备上的文件系统，只需要传入自定义的 `babyfs_fill_super` 方法，该方法主要执行步骤为：
+
+1. 设置逻辑块大小
+2. 读取磁盘上的超级块，以初始化 vfs 超级块实例
+3. 读取磁盘上的 inode，以初始化根目录的 inode 实例
+4. 最后新建根目录的 dentry 实例，并与 inode 实例相关联
 
 ## 参考
 
