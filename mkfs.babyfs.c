@@ -150,6 +150,7 @@ static void write_datablock_bitmap() {
 static void write_first_datablock() {
   // 分配一个 block_size 大小的内存
   char *block = malloc(BABYFS_BLOCK_SIZE);
+  memset(block, 0, BABYFS_BLOCK_SIZE);
   struct dir_record *d_record = (struct dir_record *)block;
   memset(d_record->name, 0, sizeof(d_record->name));  // 清空 name 字段
   // 添加 “.” 目录项
@@ -178,7 +179,7 @@ static void write_first_datablock() {
   }
 
   // 更新 root_inode->i_blocks
-  lseek(fd, BABYFS_INODE_BIT_MAP_BLOCK_BASE * BABYFS_BLOCK_SIZE,
+  lseek(fd, BABYFS_INODE_TABLE_BLOCK_BASE * BABYFS_BLOCK_SIZE,
         SEEK_SET);  // 从头开始移动偏移量
   char *inode_block = malloc(BABYFS_BLOCK_SIZE);
   if (ret = read(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
@@ -186,7 +187,16 @@ static void write_first_datablock() {
     return;
   }
   struct baby_inode *inode = (struct baby_inode *)inode_block;
+  inode->i_subdir_num = 2;
   inode->i_blocks[0] = nr_dstore_blocks;
+
+  // 写入数据
+  lseek(fd, BABYFS_INODE_TABLE_BLOCK_BASE * BABYFS_BLOCK_SIZE,
+        SEEK_SET);
+  if (ret = write(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+    perror("写入 inode 数据出错!\n");
+    return;
+  }
 
   free(inode_block);
   free(block);
