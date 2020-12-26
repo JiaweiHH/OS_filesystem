@@ -90,9 +90,10 @@ static void write_inode_bitmap() {
   char *block = malloc(BABYFS_BLOCK_SIZE);
   u_int64_t *inode_bitmap = (u_int64_t *)block;
   // 设置所有的 bit 为 1
-  memset(inode_bitmap, 0xff, BABYFS_BLOCK_SIZE);
+  memset(inode_bitmap, 0x00, BABYFS_BLOCK_SIZE);
   // 设置第一个 inode（根目录） 为 0，表示已被占用
-  *inode_bitmap = 0xfffffffffffffffe;
+  // *inode_bitmap = 0xfffffffffffffffe;
+  *inode_bitmap = 0x0000000000000001;
   int ret = write(fd, inode_bitmap, BABYFS_BLOCK_SIZE);
   // count++;
   if (ret != BABYFS_BLOCK_SIZE) {
@@ -101,7 +102,7 @@ static void write_inode_bitmap() {
   }
 
   // 如果还有剩下的 inode bitmap 块，继续写
-  *inode_bitmap = 0xffffffffffffffff;
+  *inode_bitmap = 0x0000000000000000;
   for (int i = 1;
        i < BABYFS_INODE_TABLE_BLOCK_BASE - BABYFS_INODE_BIT_MAP_BLOCK_BASE;
        ++i) {
@@ -124,7 +125,7 @@ static void write_datablock_bitmap() {
   u_int64_t *data_bitmap = (u_int64_t *)block;
   memset(data_bitmap, 0xff, BABYFS_BLOCK_SIZE);
   // 标记 root_inode 使用的第一块数据块
-  *data_bitmap = 0xfffffffffffffffe;
+  *data_bitmap = 0x0000000000000001;
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   // count++;
   // printf("write_datablock_bitmap: %d\n", count);
@@ -134,7 +135,7 @@ static void write_datablock_bitmap() {
   }
 
   // 写剩余的 bitmap
-  *data_bitmap = 0xffffffffffffffff;
+  *data_bitmap = 0x0000000000000000;
   for (int i = 1; i < nr_dstore_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE; ++i) {
     // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
@@ -154,9 +155,9 @@ static void write_first_datablock() {
   struct dir_record *d_record = (struct dir_record *)block;
   memset(d_record->name, 0, sizeof(d_record->name));  // 清空 name 字段
   // 添加 “.” 目录项
-  memcpy(d_record->name, ".", 1);
+  memcpy(d_record->name, "a", 1);
   d_record->inode_no =
-      BABYFS_ROOT_INODE_NO;  // inode 编号为 0，这样可以通过 ino +
+      1;  // inode 编号为 0，这样可以通过 ino +
                              // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 1;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;
@@ -164,9 +165,9 @@ static void write_first_datablock() {
   // 添加 “..” 目录项
   d_record++;
   memset(d_record->name, 0, sizeof(d_record->name));  //清空 name 字段
-  memcpy(d_record->name, "..", 2);
+  memcpy(d_record->name, "aa", 2);
   d_record->inode_no =
-      BABYFS_ROOT_INODE_NO;  // inode 编号为 0，这样可以通过 ino +
+      2;  // inode 编号为 0，这样可以通过 ino +
                              // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 2;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;
