@@ -50,6 +50,8 @@
 #define BABYFS_SECONDRTY_BLOCK (BABYFS_PRIMARY_BLOCK + 1)
 #define BABYFS_THIRD_BLOCKS (BABYFS_SECONDRTY_BLOCK + 1)
 #define BABYFS_N_BLOCKS BABYFS_THIRD_BLOCKS
+#define BABYFS_PER_INDEX_SIZE 4 // 每个索引数据的大小
+#define BABYFS_PER_BLOCK_INDEX_NUM BABYFS_BLOCK_SIZE / BABYFS_PER_INDEX_SIZE  // 每个数据块可以存放的索引数据数量
 
 // 磁盘超级块
 struct baby_super_block {
@@ -89,7 +91,7 @@ struct dir_record {
   __le32 inode_no;
   char name[BABYFS_FILENAME_MAX_LEN];
   __u8 name_len;
-  __u8 file_type;
+  unsigned char file_type;
 };
 
 #ifdef __KERNEL__

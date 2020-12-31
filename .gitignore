@@ -7,4 +7,7 @@
 *.mod.c
 .cache.mk
 .tmp_versions/
+usersoace_test
+usersoace_test.c
+mkfs.babyfs
 modules.order
