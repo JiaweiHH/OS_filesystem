@@ -29,7 +29,7 @@ static int baby_iterate(struct file *dir, struct dir_context *ctx) {
     unsigned long npages = dir_pages(inode);    // inode 数据的最大页数
     unsigned long nstart = pos >> PAGE_SHIFT;   // 从第 nstart 页开始查找
     // 超出最大数据
-    if(pos > inode->i_size)
+    if(pos >= inode->i_size)
         return 0;
 
     /* 开始查找目录项 */
@@ -44,13 +44,15 @@ static int baby_iterate(struct file *dir, struct dir_context *ctx) {
         }
         /* 现在开始在 page 内部查找 */
         kaddr = page_address(page);
+        char *limit = kaddr + BABYFS_BLOCK_SIZE;
         de = (struct dir_record *)kaddr;
-        for(; (char *)de < PAGE_SIZE / BABYFS_DIR_RECORD_SIZE; ++de){
+        for(; (char *)de < limit; ++de){
             // 必须要目录项存在并且 inode 编号大于 0
             if(de->name_len && de->inode_no){
                 // TODO d_type 改成指定类型
                 unsigned char d_type = DT_UNKNOWN;
-                int ret = dir_emit(ctx, de->name, de->name_len, le32_to_cpu(de->inode), d_type);
+                int ret = dir_emit(ctx, de->name, de->name_len, le32_to_cpu(de->inode_no), d_type);
+                // printk(KERN_INFO "filename: %s, de 的地址: %p, ret: %d", de->name, (char *)de, ret);
                 if(!ret){
                     baby_put_page(page);
                     return 0;

@@ -117,11 +117,12 @@ static inline struct baby_inode_info *BABY_I(struct inode *inode) {
 extern int baby_add_link(struct dentry *dentry, struct inode *inode);
 extern const struct file_operations baby_dir_operations;
 
-/* inode.c */
+/* inode.c */ 
 extern struct inode *baby_iget(struct super_block *, unsigned long);
 extern struct baby_inode *baby_get_raw_inode(struct super_block *, ino_t,
                                              struct buffer_head **);
 extern void init_inode_operations(struct inode *, umode_t);
+extern const struct address_space_operations baby_aops;
 
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb){

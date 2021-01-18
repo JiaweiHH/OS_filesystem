@@ -18,6 +18,7 @@ void init_inode_operations(struct inode *inode, umode_t mode) {
     case S_IFDIR:  // 目录文件
       inode->i_op = &simple_dir_inode_operations;
       inode->i_fop = &baby_dir_operations;
+      inode->i_mapping->a_ops = &baby_aops;
       break;
     case S_IFLNK:  // 符号链接文件
       // inode->i_op = &page_symlink_inode_operations;
@@ -219,6 +220,7 @@ int baby_get_block(struct inode *inode, sector_t block, struct buffer_head *bh,
 }
 
 static int baby_readpage(struct file *file, struct page *page) {
+  printk(KERN_INFO "baby_readpage 调用了");
   return mpage_readpage(page, baby_get_block);
 }
 

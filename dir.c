@@ -97,7 +97,8 @@ static void walk_index(struct baby_walk_struct *walk_struct) {
   int level = walk_struct->level;
   struct buffer_head *bh = sb_bread(sb, walk_struct->block);
   __u32 *dblock = (__u32 *)bh->b_data;
-  while (*dblock && (char *)dblock < BABYFS_BLOCK_SIZE) {
+  char *limit = (char *)dblock + BABYFS_BLOCK_SIZE;
+  while (*dblock && (char *)dblock < limit) {
     if (level == 1)
       walk_struct->work(*dblock, sb, walk_struct->work_extra_arg);
     else {
