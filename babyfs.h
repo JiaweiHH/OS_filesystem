@@ -1,4 +1,5 @@
 #include <linux/types.h>
+#include <linux/writeback.h>
 
 /*
  * babyfs partition layout
@@ -123,6 +124,7 @@ extern struct baby_inode *baby_get_raw_inode(struct super_block *, ino_t,
                                              struct buffer_head **);
 extern void init_inode_operations(struct inode *, umode_t);
 extern const struct address_space_operations baby_aops;
+extern int baby_write_inode(struct inode *inode, struct writeback_control *wbc);
 
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb){
