@@ -228,9 +228,16 @@ static int baby_readpage(struct file *file, struct page *page) {
   return mpage_readpage(page, baby_get_block);
 }
 
+static int baby_writepage(struct page *page, struct writeback_control *wbc) {
+  return block_write_full_page(page, baby_get_block, wbc);
+}
+
 const struct address_space_operations baby_aops = {
     .readpage = baby_readpage,
+    .writepage = baby_writepage,
 };
+
+
 // 将一个 inode 写会到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
 int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
   struct super_block *sb = inode->i_sb;

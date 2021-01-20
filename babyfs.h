@@ -1,5 +1,12 @@
+#ifndef __BABYFS_H__
+#define __BABYFS_H__
+
+/* 代码区 */
 #include <linux/types.h>
+
+#ifdef __KERNEL__
 #include <linux/writeback.h>
+#endif
 
 /*
  * babyfs partition layout
@@ -92,7 +99,7 @@ struct dir_record {
   __le32 inode_no;
   char name[BABYFS_FILENAME_MAX_LEN];
   __u8 name_len;
-  unsigned char file_type;
+  __u8 file_type;
 };
 
 #ifdef __KERNEL__
@@ -124,6 +131,8 @@ extern struct baby_inode *baby_get_raw_inode(struct super_block *, ino_t,
                                              struct buffer_head **);
 extern void init_inode_operations(struct inode *, umode_t);
 extern const struct address_space_operations baby_aops;
+extern int baby_get_block(struct inode *inode, sector_t block, struct buffer_head *bh,
+                   int create);
 extern int baby_write_inode(struct inode *inode, struct writeback_control *wbc);
 
 /* 获取超级块 */
@@ -137,4 +146,6 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb){
 #define baby_test_bit	test_bit_le
 #define baby_find_first_zero_bit find_first_zero_bit_le
 #define baby_find_next_zero_bit find_next_zero_bit_le
+#endif
+
 #endif
