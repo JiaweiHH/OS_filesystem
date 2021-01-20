@@ -90,7 +90,6 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   vfs_inode->i_atime.tv_nsec = vfs_inode->i_mtime.tv_nsec =
       vfs_inode->i_ctime.tv_nsec = 0;
   vfs_inode->i_blocks = le32_to_cpu(raw_inode->i_blocknum);
-  
   bbi->i_subdir_num = le16_to_cpu(raw_inode->i_subdir_num);
   for (i = 0; i < BABYFS_N_BLOCKS; i++) {  // 拷贝数据块索引数组
     bbi->i_blocks[i] = raw_inode->i_blocks[i];
@@ -112,8 +111,8 @@ bad_inode:
 /* address space ops */
 
 typedef struct {
-  __le32 *p;               // buffer_head 中的相对地址
-  __le32 key;              // p 中存储的值
+  __le32 *p;               // buffer_head 中的 **相对地址**
+  __le32 key;              // p 中存储的值，也就是块号
   struct buffer_head *bh;  // 索引块所在的缓冲区
 } Indirect;
 
@@ -231,8 +230,13 @@ static int baby_readpage(struct file *file, struct page *page) {
   return mpage_readpage(page, baby_get_block);
 }
 
+static int baby_writepage(struct page *page, struct writeback_control *wbc) {
+  return block_write_full_page(page, baby_get_block, wbc);
+}
+
 const struct address_space_operations baby_aops = {
     .readpage = baby_readpage,
+    .writepage = baby_writepage,
 };
 
 // 将一个 inode 写回到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
@@ -266,16 +270,14 @@ int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
   }
 
   mark_buffer_dirty(bh);
-  if (wbc->sync_mode == WB_SYNC_ALL) { // 支持同步写
+  if (wbc->sync_mode == WB_SYNC_ALL) {  // 支持同步写
     sync_dirty_buffer(bh);
-    if (buffer_req(bh) && !buffer_uptodate(bh))
-      ret = -EIO;
+    if (buffer_req(bh) && !buffer_uptodate(bh)) ret = -EIO;
   }
   brelse(bh);
 
   return ret;
 }
-
 
 // 创建一个新的 raw inode，并返回其对应的 vfs inode
 struct inode *baby_new_inode(struct inode *dir, umode_t mode,
@@ -287,9 +289,8 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   int i_no;
   int err;
 
-  inode = new_inode(sb); // 新建一个 vfs 索引节点
-  if (!inode)
-    return ERR_PTR(-ENOMEM);
+  inode = new_inode(sb);  // 获取一个 vfs 索引节点
+  if (!inode) return ERR_PTR(-ENOMEM);
   bbi = BABY_I(inode);
 
   // 读 inode 分配位图
@@ -346,9 +347,10 @@ static inline int parentdir_add_inode(struct dentry *dentry,
 }
 
 // 创建普通文件
-static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl) {
+static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode,
+                       bool excl) {
   struct inode *inode = baby_new_inode(dir, mode, &dentry->d_name);
-  
+
   if (IS_ERR(inode)) {
     printk(KERN_ERR "baby_create: get new inode failed!\n");
     return PTR_ERR(inode);
@@ -362,7 +364,7 @@ static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode, b
 static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   int ret = 0;
   struct inode *inode = baby_new_inode(dir, S_IFDIR | mode, &dentry->d_name);
-  
+
   if (IS_ERR(inode)) {
     printk(KERN_ERR "baby_mkdir: get new inode failed!\n");
     return PTR_ERR(inode);
@@ -375,17 +377,18 @@ static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   return ret;
 }
 
-struct dentry *baby_lookup(struct inode *parent, struct dentry *child, unsigned int flags) {
-    return NULL;
+struct dentry *baby_lookup(struct inode *parent, struct dentry *child,
+                           unsigned int flags) {
+  return NULL;
 }
 
 struct inode_operations baby_dir_inode_operations = {
-  .lookup         = baby_lookup,  // 
-  .create         = baby_create,  // 新建文件
-  .mkdir          = baby_mkdir,   // 新建目录
+    .lookup = baby_lookup,  //
+    .create = baby_create,  // 新建文件
+    .mkdir = baby_mkdir,    // 新建目录
 };
 
 struct inode_operations baby_file_inode_operations = {
-  .getattr        = simple_getattr,
-  .setattr        = simple_setattr,
+    .getattr = simple_getattr,
+    .setattr = simple_setattr,
 };
