@@ -1,7 +1,7 @@
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
-#include <linux/pagemap.h>
 #include <linux/iversion.h>
+#include <linux/pagemap.h>
 
 #include "babyfs.h"
 
@@ -31,13 +31,13 @@ static unsigned baby_last_byte(struct inode *inode, unsigned long page_nr) {
 }
 
 /*
-  * 直接调用 __block_write_begin，保证写数据的时候先和磁盘同步，避免数据覆盖
-  * 1. 通过 page 创建一个 bh
-  * 2. 根据 pos 和 rec_len 计算要写的数据区间 [from, to]
-  * 3. 根据 page->index 计算文件内的逻辑块号，并与 bh 绑定
-  * 4. 同步 [from, to] 之间的数据
-  */
-static int baby_prepare_chunk(struct page *page, loff_t pos, unsigned len){
+ * 直接调用 __block_write_begin，保证写数据的时候先和磁盘同步，避免数据覆盖
+ * 1. 通过 page 创建一个 bh
+ * 2. 根据 pos 和 rec_len 计算要写的数据区间 [from, to]
+ * 3. 根据 page->index 计算文件内的逻辑块号，并与 bh 绑定
+ * 4. 同步 [from, to] 之间的数据
+ */
+static int baby_prepare_chunk(struct page *page, loff_t pos, unsigned len) {
   return __block_write_begin(page, pos, len, baby_get_block);
 }
 
@@ -46,23 +46,23 @@ static int baby_commit_chunk(struct page *page, loff_t pos, unsigned len) {
   struct inode *dir = mapping->host;
   int err = 0;
   inode_inc_iversion(dir);
-	block_write_end(NULL, mapping, pos, len, len, page, NULL);  // 标记在 [from, to] 区间内的 bh 为脏
+  block_write_end(NULL, mapping, pos, len, len, page,
+                  NULL);  // 标记在 [from, to] 区间内的 bh 为脏
 
-  if (pos+len > dir->i_size) {
-    i_size_write(dir, pos+len);
+  if (pos + len > dir->i_size) {
+    i_size_write(dir, pos + len);
     mark_inode_dirty(dir);
-	}
-  err = write_one_page(page); // 调用 aops->writepage，函数执行结束 page 被解锁
-  if(!err)
-    sync_inode_metadata(dir, 1);  // 将 inode 写到磁盘
+  }
+  err = write_one_page(page);  // 调用 aops->writepage，函数执行结束 page 被解锁
+  if (!err) sync_inode_metadata(dir, 1);  // 将 inode 写到磁盘
   return err;
 }
 
 void baby_set_de_type(struct dir_record *de, struct inode *inode) {
   de->file_type = 0;
-  if(S_ISDIR(inode->i_mode))
+  if (S_ISDIR(inode->i_mode))
     de->file_type = S_IFDIR;
-  else if(S_ISREG(inode->i_mode))
+  else if (S_ISREG(inode->i_mode))
     de->file_type = S_IFREG;
   return;
 }
@@ -86,7 +86,7 @@ int baby_add_link(struct dentry *dentry, struct inode *inode) {
   unsigned short rec_len;
   int err = 0;
   /* 开始查找空闲的目录项 */
-  for (nloop = 0; nloop < npages; ++nloop) {
+  for (nloop = 0; nloop <= npages; ++nloop) {
     page = baby_get_page(dir, nloop);  // 按编号查找 page
     if (IS_ERR(page)) goto out;
     lock_page(page);
@@ -117,8 +117,7 @@ got_it:
   pos = page_offset(page) + (char *)de - (char *)page_address(page);
   // 直接调用 __block_write_begin，保证写数据的时候先和磁盘同步，避免数据覆盖
   err = baby_prepare_chunk(page, pos, rec_len);
-  if(err)
-    goto page_unlock;
+  if (err) goto page_unlock;
   de->name_len = namelen;
   memcpy(de->name, name, namelen);
   de->inode_no = cpu_to_le32(inode->i_ino);

@@ -44,7 +44,7 @@
   (BABYFS_INODE_TABLE_BLOCK_BASE + BABYFS_INODE_BLOCKS_NUM)  // 数据位图起始块号
 
 #define BABYFS_FILENAME_MAX_LEN 250  // 文件名最大长度，为了目录项对齐到 256B
-#define BABYFS_DIR_RECORD_SIZE 256   // 目录项大小
+#define BABYFS_DIR_RECORD_SIZE 256  // 目录项大小
 
 #define BABYFS_CURRENT_TIME (current_kernel_time())  // 当前系统时间
 #define BABYFS_FILE_TYPE_DIR 1
@@ -58,8 +58,9 @@
 #define BABYFS_SECONDRTY_BLOCK (BABYFS_PRIMARY_BLOCK + 1)
 #define BABYFS_THIRD_BLOCKS (BABYFS_SECONDRTY_BLOCK + 1)
 #define BABYFS_N_BLOCKS BABYFS_THIRD_BLOCKS
-#define BABYFS_PER_INDEX_SIZE 4 // 每个索引数据的大小
-#define BABYFS_PER_BLOCK_INDEX_NUM BABYFS_BLOCK_SIZE / BABYFS_PER_INDEX_SIZE  // 每个数据块可以存放的索引数据数量
+#define BABYFS_PER_INDEX_SIZE 4  // 每个索引数据的大小
+#define BABYFS_PER_BLOCK_INDEX_NUM \
+  BABYFS_BLOCK_SIZE / BABYFS_PER_INDEX_SIZE  // 每个数据块可以存放的索引数据数量
 
 // 磁盘超级块
 struct baby_super_block {
@@ -118,32 +119,32 @@ struct baby_inode_info {
 
 // 从 vfs inode 返回包含他的 baby_inode_info
 static inline struct baby_inode_info *BABY_I(struct inode *inode) {
-	return container_of(inode, struct baby_inode_info, vfs_inode);
+  return container_of(inode, struct baby_inode_info, vfs_inode);
 }
 
 /* dir.c */
 extern int baby_add_link(struct dentry *dentry, struct inode *inode);
 extern const struct file_operations baby_dir_operations;
 
-/* inode.c */ 
+/* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);
 extern struct baby_inode *baby_get_raw_inode(struct super_block *, ino_t,
                                              struct buffer_head **);
 extern void init_inode_operations(struct inode *, umode_t);
 extern const struct address_space_operations baby_aops;
-extern int baby_get_block(struct inode *inode, sector_t block, struct buffer_head *bh,
-                   int create);
+extern int baby_get_block(struct inode *inode, sector_t block,
+                          struct buffer_head *bh, int create);
 extern int baby_write_inode(struct inode *inode, struct writeback_control *wbc);
 
 /* 获取超级块 */
-static inline struct baby_sb_info *BABY_SB(struct super_block *sb){
+static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
   return sb->s_fs_info;
 }
 
 // 小端序位图操作方法
-#define baby_set_bit	__set_bit_le // set 1
-#define baby_clear_bit	__clear_bit_le // set 0
-#define baby_test_bit	test_bit_le
+#define baby_set_bit __set_bit_le      // set 1
+#define baby_clear_bit __clear_bit_le  // set 0
+#define baby_test_bit test_bit_le
 #define baby_find_first_zero_bit find_first_zero_bit_le
 #define baby_find_next_zero_bit find_next_zero_bit_le
 #endif
