@@ -19,7 +19,7 @@ void init_inode_operations(struct inode *inode, umode_t mode) {
       // inode->i_fop = &myfs_file_operations;
       break;
     case S_IFDIR:  // 目录文件
-      inode->i_op = &simple_dir_inode_operations;
+      inode->i_op = &baby_dir_inode_operations;
       inode->i_fop = &baby_dir_operations;
       inode->i_mapping->a_ops = &baby_aops;
       break;
@@ -63,8 +63,11 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   gid_t i_gid;
   int i;
 
-  vfs_inode = iget_locked(sb, ino);  // 分配一个加锁的 vfs inode
+  // 获取 ino 标志的 inode，若在 inode cache 中直接返回，否则分配一个加锁的 vfs inode
+  vfs_inode = iget_locked(sb, ino);
   if (!vfs_inode) return ERR_PTR(-ENOMEM);
+  if (!(vfs_inode->i_state & I_NEW))  // inode cache 中的 inode 可直接使用
+    return vfs_inode;
   bbi = BABY_I(vfs_inode);
 
   raw_inode = baby_get_raw_inode(sb, ino, &bh);  // 读磁盘的 inode
@@ -86,7 +89,7 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   vfs_inode->i_mtime.tv_sec = (signed)le32_to_cpu(raw_inode->i_mtime);
   vfs_inode->i_atime.tv_nsec = vfs_inode->i_mtime.tv_nsec =
       vfs_inode->i_ctime.tv_nsec = 0;
-	vfs_inode->i_blocks = le32_to_cpu(raw_inode->i_blocknum);
+  vfs_inode->i_blocks = le32_to_cpu(raw_inode->i_blocknum);
   
   bbi->i_subdir_num = le16_to_cpu(raw_inode->i_subdir_num);
   for (i = 0; i < BABYFS_N_BLOCKS; i++) {  // 拷贝数据块索引数组
@@ -231,7 +234,8 @@ static int baby_readpage(struct file *file, struct page *page) {
 const struct address_space_operations baby_aops = {
     .readpage = baby_readpage,
 };
-// 将一个 inode 写会到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
+
+// 将一个 inode 写回到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
 int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
   struct super_block *sb = inode->i_sb;
   struct baby_inode_info *bbi = BABY_I(inode);
@@ -250,24 +254,24 @@ int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
   raw_inode->i_mode = cpu_to_le16(inode->i_mode);
   raw_inode->i_uid = cpu_to_le16(i_uid_read(inode));
   raw_inode->i_gid = cpu_to_le16(i_gid_read(inode));
-	raw_inode->i_size = cpu_to_le32(inode->i_size);
+  raw_inode->i_size = cpu_to_le32(inode->i_size);
   raw_inode->i_atime = cpu_to_le32(inode->i_atime.tv_sec);
-	raw_inode->i_ctime = cpu_to_le32(inode->i_ctime.tv_sec);
-	raw_inode->i_mtime = cpu_to_le32(inode->i_mtime.tv_sec);
-	raw_inode->i_blocknum = cpu_to_le32(inode->i_blocks);
-	raw_inode->i_nlink = cpu_to_le16(inode->i_nlink);
-	raw_inode->i_subdir_num = cpu_to_le16(bbi->i_subdir_num);
+  raw_inode->i_ctime = cpu_to_le32(inode->i_ctime.tv_sec);
+  raw_inode->i_mtime = cpu_to_le32(inode->i_mtime.tv_sec);
+  raw_inode->i_blocknum = cpu_to_le32(inode->i_blocks);
+  raw_inode->i_nlink = cpu_to_le16(inode->i_nlink);
+  raw_inode->i_subdir_num = cpu_to_le16(bbi->i_subdir_num);
   for (i = 0; i < BABYFS_N_BLOCKS; i++) {
     raw_inode->i_blocks[i] = bbi->i_blocks[i];
   }
 
   mark_buffer_dirty(bh);
   if (wbc->sync_mode == WB_SYNC_ALL) { // 支持同步写
-		sync_dirty_buffer(bh);
-		if (buffer_req(bh) && !buffer_uptodate(bh))
-			ret = -EIO;
-	}
-	brelse(bh);
+    sync_dirty_buffer(bh);
+    if (buffer_req(bh) && !buffer_uptodate(bh))
+      ret = -EIO;
+  }
+  brelse(bh);
 
   return ret;
 }
@@ -281,8 +285,9 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   struct super_block *sb = dir->i_sb;
   struct buffer_head *bh_bitmap;
   int i_no;
+  int err;
 
-  inode = new_inode(sb); // 获取一个 vfs 索引节点
+  inode = new_inode(sb); // 新建一个 vfs 索引节点
   if (!inode)
     return ERR_PTR(-ENOMEM);
   bbi = BABY_I(inode);
@@ -292,43 +297,52 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   bh_bitmap = sb_bread(sb, BABYFS_INODE_BIT_MAP_BLOCK_BASE);
   // 寻找第一个空闲的位
   i_no = baby_find_first_zero_bit(bh_bitmap->b_data, BABYFS_BIT_PRE_BLOCK);
-  printk("baby_find_first_zero_bit get i_no: %d\n", i_no);
   if (i_no >= BABYFS_BIT_PRE_BLOCK) {
     brelse(bh_bitmap);
-    return NULL;
+    err = -ENOSPC;
+    goto fail;
   }
   
-  baby_clear_bit(i_no, bh_bitmap->b_data); // 占用这一位
+  baby_set_bit(i_no, bh_bitmap->b_data); // 占用这一位
   mark_buffer_dirty(bh_bitmap);
-	brelse(bh_bitmap);
+  brelse(bh_bitmap);
 
   // 设置 inode 的属性
   inode_init_owner(inode, dir, mode);
   inode->i_ino = i_no;
-	inode->i_blocks = 0;
-	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+  inode->i_blocks = 0;
+  inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
   bbi->i_subdir_num = 0;
-
+  if (insert_inode_locked(inode) < 0) { // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，并设置 inode 的 i_state 状态
+    printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %lu", i_no);
+    err = -EIO;
+    goto fail;
+  }
   // 初始化操作集合
   init_inode_operations(inode, inode->i_mode);
 
-	mark_inode_dirty(inode);
+  mark_inode_dirty(inode);
 
-  printk("baby_new_inode: alloc new inode ino");
-	return inode;
+  printk("baby_new_inode: alloc new inode ino\n");
+  return inode;
+
+fail:
+  make_bad_inode(inode);
+  iput(inode);
+  return ERR_PTR(err);
 }
 
-static inline int parentdir_add_inode(struct dentry *dentry, struct inode *inode)
-{
-	int err = baby_add_link(dentry, inode); // 在父目录中添加一个目录项
-	if (!err) {
-		d_instantiate_new(dentry, inode); // 将 inode 与 dentry 相关联
-		return 0;
-	}
-	inode_dec_link_count(inode);
-	unlock_new_inode(inode);
-	iput(inode);
-	return err;
+static inline int parentdir_add_inode(struct dentry *dentry,
+                                      struct inode *inode) {
+  int err = baby_add_link(dentry, inode);  // 在父目录中添加一个目录项
+  if (!err) {
+    d_instantiate_new(dentry, inode);  // 将 inode 与 dentry 相关联
+    return 0;
+  }
+  inode_dec_link_count(inode);
+  unlock_new_inode(inode);
+  iput(inode);
+  return err;
 }
 
 // 创建普通文件
@@ -341,7 +355,7 @@ static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode, b
   }
 
   mark_inode_dirty(inode);
-	return parentdir_add_inode(dentry, inode);
+  return parentdir_add_inode(dentry, inode);
 }
 
 // 创建目录
@@ -355,8 +369,8 @@ static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   }
 
   mark_inode_dirty(inode);
-	ret = parentdir_add_inode(dentry, inode);
-	if (!ret) inode_dec_link_count(dir); // 父目录的引用计数+1
+  ret = parentdir_add_inode(dentry, inode);
+  if (!ret) inode_dec_link_count(dir); // 父目录的引用计数 -1
 
   return ret;
 }

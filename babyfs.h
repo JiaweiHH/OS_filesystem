@@ -1,5 +1,8 @@
 #include <linux/types.h>
+
+#ifdef __KERNEL__
 #include <linux/writeback.h>
+#endif
 
 /*
  * babyfs partition layout

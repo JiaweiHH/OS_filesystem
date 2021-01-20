@@ -7,6 +7,10 @@
 #define ADD_DIR 0
 #define FIND_FIR 1
 
+int baby_add_link(struct dentry *dentry, struct inode *inode) {
+    return 0;
+}
+
 // 根据 inode 和页索引找到 page
 static struct page *baby_get_page(struct inode *dir, int n) {
 	struct address_space *as = dir->i_mapping;
