@@ -62,7 +62,7 @@ static void write_inode_table() {
   // CURRENT_TIME; 放到 fill_super 里面做
   root_inode->i_blocknum = 1;  // inode 对应文件占用的块数
   root_inode->i_nlink = 1;     // 硬链接计数
-  root_inode->i_mode = 0755 | S_IFDIR;
+  root_inode->i_mode = 0777 | S_IFDIR;
   // 写第一块 inode_table，里面包含了第一个 inode 和其他空的 inode
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   // count++;
@@ -155,9 +155,9 @@ static void write_first_datablock() {
   struct dir_record *d_record = (struct dir_record *)block;
   memset(d_record->name, 0, sizeof(d_record->name));  // 清空 name 字段
   // 添加 “.” 目录项
-  memcpy(d_record->name, "a", 1);
+  memcpy(d_record->name, ".", 1);
   d_record->inode_no =
-      1;  // inode 编号为 0，这样可以通过 ino +
+      0;  // inode 编号为 0，这样可以通过 ino +
                              // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 1;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;
@@ -165,9 +165,9 @@ static void write_first_datablock() {
   // 添加 “..” 目录项
   d_record++;
   memset(d_record->name, 0, sizeof(d_record->name));  //清空 name 字段
-  memcpy(d_record->name, "aa", 2);
+  memcpy(d_record->name, "..", 2);
   d_record->inode_no =
-      2;  // inode 编号为 0，这样可以通过 ino +
+      0;  // inode 编号为 0，这样可以通过 ino +
                              // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 2;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;

@@ -64,6 +64,15 @@ void baby_set_de_type(struct dir_record *de, struct inode *inode) {
   return;
 }
 
+static inline int baby_match(int len, const char * const name,
+					struct dir_record *de){
+  if(len != de->name_len)
+    return 0;
+  if(!de->inode_no)
+    return 0;
+  return !memcmp(name, de->name, len);
+}
+
 /*
  * 添加一个磁盘目录项
  * @dentry. 待添加的目录项
@@ -99,6 +108,8 @@ int baby_add_link(struct dentry *dentry, struct inode *inode) {
         rec_len = BABYFS_BLOCK_SIZE;
         goto got_it;
       }
+      if (baby_match (namelen, name, de))	// 判断重名
+				goto page_unlock;
       rec_len = BABYFS_DIR_RECORD_SIZE;
       // 无效 de
       if (!de->inode_no && de->name_len) goto got_it;
@@ -160,7 +171,8 @@ static int baby_iterate(struct file *dir, struct dir_context *ctx) {
       // 必须要目录项存在并且 inode 编号大于 0
       if (de->name_len && de->inode_no) {
         // TODO d_type 改成指定类型
-        unsigned char d_type = DT_UNKNOWN;
+        unsigned char d_type = de->file_type;
+        printk(KERN_INFO "de->name: %s, de->inode_no: %d, de->namelen: %d, de->file_type: %d", de->name, de->inode_no, de->name_len, de->file_type);
         int ret = dir_emit(ctx, de->name, de->name_len,
                            le32_to_cpu(de->inode_no), d_type);
         // printk(KERN_INFO "filename: %s, de 的地址: %p, ret: %d", de->name,

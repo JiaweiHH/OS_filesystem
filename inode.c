@@ -16,7 +16,8 @@ void init_inode_operations(struct inode *inode, umode_t mode) {
       break;
     case S_IFREG:  // 普通文件
       inode->i_op = &baby_file_inode_operations;
-      // inode->i_fop = &myfs_file_operations;
+      // inode->i_fop = &baby_file_operations;
+      inode->i_mapping->a_ops = &baby_aops;
       break;
     case S_IFDIR:  // 目录文件
       inode->i_op = &baby_dir_inode_operations;
@@ -234,9 +235,32 @@ static int baby_writepage(struct page *page, struct writeback_control *wbc) {
   return block_write_full_page(page, baby_get_block, wbc);
 }
 
+static int baby_write_end(struct file *file, struct address_space *mapping,
+			loff_t pos, unsigned len, unsigned copied,
+			struct page *page, void *fsdata) {
+  int ret;
+
+	ret = generic_write_end(file, mapping, pos, len, copied, page, fsdata);
+  // TODO if (ret < 0)
+	return ret;
+}
+
+static int baby_write_begin(struct file *file, struct address_space *mapping,
+		loff_t pos, unsigned len, unsigned flags,
+		struct page **pagep, void **fsdata) {
+  int ret;
+
+	ret = block_write_begin(mapping, pos, len, flags, pagep,
+				baby_get_block);
+  // TODO if (ret < len)
+  return ret;
+}
+
 const struct address_space_operations baby_aops = {
     .readpage = baby_readpage,
     .writepage = baby_writepage,
+    .write_end = baby_write_end,
+    .write_begin = baby_write_begin,
 };
 
 // 将一个 inode 写回到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
@@ -363,13 +387,14 @@ static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 // 创建目录
 static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   int ret = 0;
+  inode_inc_link_count(dir);
   struct inode *inode = baby_new_inode(dir, S_IFDIR | mode, &dentry->d_name);
 
   if (IS_ERR(inode)) {
     printk(KERN_ERR "baby_mkdir: get new inode failed!\n");
     return PTR_ERR(inode);
   }
-
+  inode_inc_link_count(inode);
   mark_inode_dirty(inode);
   ret = parentdir_add_inode(dentry, inode);
   if (!ret) inode_dec_link_count(dir); // 父目录的引用计数 -1
@@ -386,6 +411,7 @@ struct inode_operations baby_dir_inode_operations = {
     .lookup = baby_lookup,  //
     .create = baby_create,  // 新建文件
     .mkdir = baby_mkdir,    // 新建目录
+    .getattr = simple_getattr,
 };
 
 struct inode_operations baby_file_inode_operations = {
