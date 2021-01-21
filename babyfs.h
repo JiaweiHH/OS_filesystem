@@ -125,6 +125,8 @@ static inline struct baby_inode_info *BABY_I(struct inode *inode) {
 /* dir.c */
 extern int baby_add_link(struct dentry *dentry, struct inode *inode);
 extern const struct file_operations baby_dir_operations;
+extern unsigned int baby_inode_by_name(struct inode *dir, const struct qstr *child);
+extern int baby_make_empty(struct inode *inode, struct inode *parent);
 
 /* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);

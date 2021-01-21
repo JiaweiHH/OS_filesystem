@@ -189,6 +189,81 @@ static int baby_iterate(struct file *dir, struct dir_context *ctx) {
   return 0;
 }
 
+// 实现从 dir 中根据 child 文件名匹配目录项
+struct dir_record *baby_find_entry(struct inode *dir,
+			const struct qstr *child, struct page **res_page) {
+  struct dir_record *de = NULL;
+  unsigned long nstart = 0, nloop, npages = dir_pages(dir);  // 获取 page number
+  struct page *page = NULL;
+  struct baby_inode_info *bbi = BABY_I(dir);
+  char *kaddr, *limit;
+  if(npages == 0)
+    goto out;
+  for(nloop = nstart; nloop <= npages; ++nloop) {
+    page = baby_get_page(dir, nloop);
+    if(IS_ERR(page))
+      goto out;
+    kaddr = page_address(page);
+    limit = kaddr + baby_last_byte(dir, nloop);
+    de = (struct dir_record *)kaddr;
+    for(; (char *)de < limit; ++de){
+      if(!de->name_len){
+        baby_put_page(page);
+        goto out;
+      }
+      if(baby_match(child->len, child->name, de)) {
+        *res_page = page;
+        return de;
+      }
+    }
+  }
+out:
+  return NULL;
+}
+
+unsigned int baby_inode_by_name(struct inode *dir, const struct qstr *child) {
+  unsigned int ino = 0;
+  struct dir_record *de;
+  struct page *page;
+  de = baby_find_entry(dir, child, &page);
+  if(de) {
+    ino = le32_to_cpu(de->inode_no);
+    baby_put_page(page);
+  }
+  return ino;
+}
+
+int baby_make_empty(struct inode *inode, struct inode *parent) {
+  struct page *page = grab_cache_page(inode->i_mapping, 0); // 从 page_cache 中获取 index = 0 的 page，不存在的话就会创建一个
+  struct dir_record *de = NULL;
+  int err;
+  void *kaddr;
+  err = baby_prepare_chunk(page, 0, BABYFS_BLOCK_SIZE); // 保证写数据的时候先和磁盘同步
+  if(err) {
+    printk(KERN_ERR "baby_make_empty: baby_prepare_chunk failed");
+    unlock_page(page);
+		goto fail;
+  }
+  kaddr = kmap_atomic(page); // 关闭内核抢占，这个函数里面会调用 page_address()
+  memset(kaddr, 0, BABYFS_BLOCK_SIZE);
+  de = (struct dir_record *)kaddr;
+  de->name_len = 1;
+  memcpy(de->name, ".", 1);
+  de->inode_no = cpu_to_le32(inode->i_ino);
+  baby_set_de_type(de, inode);
+  ++de;
+
+  de->name_len = 2;
+  de->inode_no = cpu_to_le32(parent->i_ino);
+  memcpy(de->name, "..", 2);
+  baby_set_de_type(de, inode);
+  kunmap_atomic(kaddr);
+  err = baby_commit_chunk(page, 0, BABYFS_BLOCK_SIZE);
+fail:
+  put_page(page);
+  return err;
+}
+
 const struct file_operations baby_dir_operations = {
     .read = generic_read_dir,
     .iterate_shared = baby_iterate,

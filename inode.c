@@ -397,6 +397,11 @@ static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
     goto out;
   }
   inode_inc_link_count(inode); // 新增的子目录引用计数为 2
+  ret = baby_make_empty(inode, dir);  // 增加 . 和 .. 目录项
+  if(ret) {
+    printk(KERN_ERR "baby_mkdir:add . and .. failed!\n");
+    goto link_fail;
+  }
   mark_inode_dirty(inode);
   
   ret = baby_add_link(dentry, inode);
@@ -406,6 +411,7 @@ static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   }
 
   d_instantiate_new(dentry, inode);
+  printk("d_instance");
   return 0;
 
 link_fail: // 释放子目录的 inode
@@ -418,9 +424,27 @@ out:
   return ret;
 }
 
-struct dentry *baby_lookup(struct inode *parent, struct dentry *child,
+
+
+/* 
+ * 根据父目录和文件名查找 inode，关联目录项；需要从洗盘文件系统根据 ino 读取 inode 信息
+ */
+struct dentry *baby_lookup(struct inode *dir, struct dentry *dentry,
                            unsigned int flags) {
-  return NULL;
+  // printk(KERN_INFO "lookup调用");
+  struct inode *inode;
+  unsigned int ino;
+  if(dentry->d_name.len > BABYFS_FILENAME_MAX_LEN)
+    return ERR_PTR(-ENAMETOOLONG);
+  // 从父 inode 中根据文件名查找 ino
+  ino = baby_inode_by_name(dir, &dentry->d_name);
+  inode = NULL;
+  if(ino) {
+    inode = baby_iget(dir->i_sb, ino);
+    if (inode == ERR_PTR(-ESTALE))
+      return ERR_PTR(-EIO);
+  }
+  return d_splice_alias(inode, dentry);
 }
 
 struct inode_operations baby_dir_inode_operations = {
