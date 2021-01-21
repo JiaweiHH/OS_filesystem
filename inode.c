@@ -324,7 +324,7 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
 
   mark_inode_dirty(inode);
 
-  printk("baby_new_inode: alloc new inode ino\n");
+  printk("baby_new_inode: alloc new inode ino: %d\n", i_no);
   return inode;
 
 fail:
@@ -340,6 +340,8 @@ static inline int parentdir_add_inode(struct dentry *dentry,
     d_instantiate_new(dentry, inode);  // 将 inode 与 dentry 相关联
     return 0;
   }
+  
+  printk(KERN_ERR "parentdir_add_inode:baby_add_link failed!\n");
   inode_dec_link_count(inode);
   unlock_new_inode(inode);
   iput(inode);
@@ -356,24 +358,39 @@ static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode,
     return PTR_ERR(inode);
   }
 
-  mark_inode_dirty(inode);
   return parentdir_add_inode(dentry, inode);
 }
 
 // 创建目录
 static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   int ret = 0;
-  struct inode *inode = baby_new_inode(dir, S_IFDIR | mode, &dentry->d_name);
-
+  struct inode *inode;
+  inode_inc_link_count(dir); // 父目录下添加子目录，需要将父目录的引用计数加一，因为子目录的“..”
+  inode = baby_new_inode(dir, S_IFDIR | mode, &dentry->d_name);
   if (IS_ERR(inode)) {
     printk(KERN_ERR "baby_mkdir: get new inode failed!\n");
-    return PTR_ERR(inode);
+    ret = PTR_ERR(inode);
+    goto out;
+  }
+  inode_inc_link_count(inode); // 新增的子目录引用计数为 2
+  mark_inode_dirty(inode);
+  
+  ret = baby_add_link(dentry, inode);
+  if (ret) {
+    printk(KERN_ERR "baby_mkdir:baby_add_link failed!\n");
+    goto link_fail;
   }
 
-  mark_inode_dirty(inode);
-  ret = parentdir_add_inode(dentry, inode);
-  if (!ret) inode_dec_link_count(dir); // 父目录的引用计数 -1
+  d_instantiate_new(dentry, inode);
+  return 0;
 
+link_fail: // 释放子目录的 inode
+  inode_dec_link_count(inode);
+  inode_dec_link_count(inode);
+  unlock_new_inode(inode);
+  iput(inode);
+out:
+  inode_dec_link_count(inode);
   return ret;
 }
 
