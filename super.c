@@ -6,6 +6,7 @@
 
 #include "babyfs.h"
 
+int NR_DSTORE_BLOCKS;
 struct super_operations babyfs_super_opts;
 
 static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
@@ -32,6 +33,7 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
     goto failed;
   }
   baby_sb = (struct baby_super_block *)bh->b_data;
+  NR_DSTORE_BLOCKS = baby_sb->nr_dstore_blocks;
 
   // 初始化超级块
   sb->s_magic = baby_sb->magic; // 魔幻数

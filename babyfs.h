@@ -50,6 +50,8 @@
 #define BABYFS_FILE_TYPE_DIR 1
 #define BABYFS_FILE_TYPE_FILE 2
 
+extern int NR_DSTORE_BLOCKS;  // 保存数据块起始块号
+
 /*
  * 数据块索引
  */
@@ -137,6 +139,9 @@ extern const struct address_space_operations baby_aops;
 extern int baby_get_block(struct inode *inode, sector_t block,
                           struct buffer_head *bh, int create);
 extern int baby_write_inode(struct inode *inode, struct writeback_control *wbc);
+
+/* file.c */
+extern const struct file_operations baby_file_operations;
 
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {

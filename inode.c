@@ -16,7 +16,7 @@ void init_inode_operations(struct inode *inode, umode_t mode) {
       break;
     case S_IFREG:  // 普通文件
       inode->i_op = &baby_file_inode_operations;
-      // inode->i_fop = &baby_file_operations;
+      inode->i_fop = &baby_file_operations;
       inode->i_mapping->a_ops = &baby_aops;
       break;
     case S_IFDIR:  // 目录文件
@@ -144,6 +144,7 @@ static Indirect *baby_get_branch(struct inode *inode, int depth, int *offsets,
   *err = 0;
   // 先把最大的那个索引数据填充进去
   add_chain(chain, NULL, BABY_I(inode)->i_blocks + *offsets);
+  // printk("BABY_I(inode)->i_blocks[0]: %d", BABY_I(inode)->i_blocks[0]);
   if (!p->key) goto no_block;
   // offset 从上到下保存了每一级索引的地址，只需要按顺序读取就可以了
   while (--depth) {
@@ -198,20 +199,30 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
                            unsigned long maxblocks, struct buffer_head *bh,
                            int create) {
   int err = -EIO;
-  int offset[4];      // 存放 block 的索引信息
+  int offset[4] = {99};      // 存放 block 的索引信息
   Indirect chain[4];  // 读取索引信息，存放数据
   Indirect *partial;
   // 获取索引深度，直接索引是 0
   int depth = baby_block_to_path(inode, block, offset);
   if (!depth) return err;
   // 读取索引信息，返回 NULL 表示找到了所有的
+  // printk("depth: %d", depth);
+  // printk("offset[0]: %d, offset[1]: %d, offset[2]: %d, offset[3]: %d", offset[0], offset[1], offset[2], offset[3]);
   partial = baby_get_branch(inode, depth, offset, chain, &err);
   // TODO 没找到的时候需要怎么做
   if (!partial) {
+    printk(KERN_INFO "chain[depth - 1].key: %d", chain[depth - 1].key);
     map_bh(bh, inode->i_sb,
            chain[depth - 1].key);  // chain 的最后一个元素存储的是最后的块号
     partial = chain + depth - 1;
+    goto got_it;
   }
+
+  if(!create || err == -EIO)
+    goto cleanup;
+
+got_it:
+cleanup:
   while (partial > chain) {
     brelse(partial->bh);
     partial--;
@@ -233,6 +244,10 @@ static int baby_readpage(struct file *file, struct page *page) {
 
 static int baby_writepage(struct page *page, struct writeback_control *wbc) {
   return block_write_full_page(page, baby_get_block, wbc);
+}
+
+static int baby_writepages(struct address_space *mapping, struct writeback_control *wbc) {
+  return mpage_writepages(mapping, wbc, baby_get_block);
 }
 
 static int baby_write_end(struct file *file, struct address_space *mapping,
@@ -259,6 +274,7 @@ static int baby_write_begin(struct file *file, struct address_space *mapping,
 const struct address_space_operations baby_aops = {
     .readpage = baby_readpage,
     .writepage = baby_writepage,
+    .writepages = baby_writepages,
     .write_end = baby_write_end,
     .write_begin = baby_write_begin,
 };
@@ -338,6 +354,8 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   inode->i_blocks = 0;
   inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
   bbi->i_subdir_num = 0;
+  // bbi->i_blocks[0] = i_no + NR_DSTORE_BLOCKS; // 新 inode 的第一个数据块号
+  memset(bbi->i_blocks, 0, sizeof(bbi->i_blocks));  // 初始化索引数组
   if (insert_inode_locked(inode) < 0) { // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，并设置 inode 的 i_state 状态
     printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %lu", i_no);
     err = -EIO;
@@ -427,7 +445,7 @@ out:
 
 
 /* 
- * 根据父目录和文件名查找 inode，关联目录项；需要从洗盘文件系统根据 ino 读取 inode 信息
+ * 根据父目录和文件名查找 inode，关联目录项；需要从磁盘文件系统根据 ino 读取 inode 信息
  */
 struct dentry *baby_lookup(struct inode *dir, struct dentry *dentry,
                            unsigned int flags) {

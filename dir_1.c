@@ -125,6 +125,7 @@ got_it:
   pos = page_offset(page) + (char *)de - (char *)page_address(page);
   // 直接调用 __block_write_begin，保证写数据的时候先和磁盘同步，避免数据覆盖
   err = baby_prepare_chunk(page, pos, rec_len);
+  // printk(KERN_INFO "add_link---err_baby_prepare_chunk: %d", err);
   if (err) goto page_unlock;
   de->name_len = namelen;
   memcpy(de->name, name, namelen);
@@ -132,6 +133,7 @@ got_it:
   baby_set_de_type(de, inode);
   // 提交 change，把 page 写到磁盘
   err = baby_commit_chunk(page, pos, rec_len);
+  // printk(KERN_INFO "add_link---err_baby_commit_chunk: %d", err);
   dir->i_mtime = dir->i_ctime = BABYFS_CURRENT_TIME;
   mark_inode_dirty(dir);
 page_put:

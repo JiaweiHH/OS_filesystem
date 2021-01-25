@@ -1,6 +1,6 @@
 ifneq ($(KERNELRELEASE),)
 obj-m := babyfs.o
-babyfs-objs := inode.o super.o dir_1.o
+babyfs-objs := inode.o super.o dir_1.o file.o
 else
 KDIR:=/lib/modules/$(shell uname -r)/build
 all:
