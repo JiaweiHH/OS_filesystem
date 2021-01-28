@@ -92,7 +92,6 @@ static void write_inode_bitmap() {
   // 设置所有的 bit 为 1
   memset(inode_bitmap, 0x00, BABYFS_BLOCK_SIZE);
   // 设置第一个 inode（根目录） 为 0，表示已被占用
-  // *inode_bitmap = 0xfffffffffffffffe;
   *inode_bitmap = 0x0000000000000001;
   int ret = write(fd, inode_bitmap, BABYFS_BLOCK_SIZE);
   // count++;
@@ -123,7 +122,7 @@ static void write_datablock_bitmap() {
   // 写第一块 bitmap
   char *block = malloc(BABYFS_BLOCK_SIZE);
   u_int64_t *data_bitmap = (u_int64_t *)block;
-  memset(data_bitmap, 0xff, BABYFS_BLOCK_SIZE);
+  memset(data_bitmap, 0x00, BABYFS_BLOCK_SIZE);
   // 标记 root_inode 使用的第一块数据块
   *data_bitmap = 0x0000000000000001;
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
@@ -156,9 +155,8 @@ static void write_first_datablock() {
   memset(d_record->name, 0, sizeof(d_record->name));  // 清空 name 字段
   // 添加 “.” 目录项
   memcpy(d_record->name, ".", 1);
-  d_record->inode_no =
-      0;  // inode 编号为 0，这样可以通过 ino +
-                             // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
+  d_record->inode_no = 0;  // inode 编号为 0，这样可以通过 ino +
+                           // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 1;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;
 
@@ -166,9 +164,8 @@ static void write_first_datablock() {
   d_record++;
   memset(d_record->name, 0, sizeof(d_record->name));  //清空 name 字段
   memcpy(d_record->name, "..", 2);
-  d_record->inode_no =
-      0;  // inode 编号为 0，这样可以通过 ino +
-                             // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
+  d_record->inode_no = 0;  // inode 编号为 0，这样可以通过 ino +
+                           // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 2;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;
 
@@ -192,8 +189,7 @@ static void write_first_datablock() {
   inode->i_blocks[0] = nr_dstore_blocks;
 
   // 写入数据
-  lseek(fd, BABYFS_INODE_TABLE_BLOCK_BASE * BABYFS_BLOCK_SIZE,
-        SEEK_SET);
+  lseek(fd, BABYFS_INODE_TABLE_BLOCK_BASE * BABYFS_BLOCK_SIZE, SEEK_SET);
   if (ret = write(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
     perror("写入 inode 数据出错!\n");
     return;
