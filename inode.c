@@ -8,7 +8,9 @@
 
 struct inode_operations baby_dir_inode_operations;
 struct inode_operations baby_file_inode_operations;
+struct inode_operations baby_symlink_inode_operations;
 
+// 根据文件类型初始化文件inode的操作集合
 void init_inode_operations(struct inode *inode, umode_t mode) {
   switch (mode & S_IFMT) {
     default:  // 创建除了目录和普通文件之外的其他文件
@@ -25,8 +27,10 @@ void init_inode_operations(struct inode *inode, umode_t mode) {
       inode->i_mapping->a_ops = &baby_aops;
       break;
     case S_IFLNK:  // 符号链接文件
-      // inode->i_op = &page_symlink_inode_operations;
-      // inode_nohighmem(inode);
+      // TODO 支持快速符号链接
+      inode->i_op = &baby_symlink_inode_operations;
+      inode_nohighmem(inode);
+      inode->i_mapping->a_ops = &baby_aops;
       break;
   }
 }
@@ -552,14 +556,6 @@ static int baby_write_begin(struct file *file, struct address_space *mapping,
   return ret;
 }
 
-const struct address_space_operations baby_aops = {
-    .readpage = baby_readpage,
-    .writepage = baby_writepage,
-    .writepages = baby_writepages,
-    .write_end = baby_write_end,
-    .write_begin = baby_write_begin,
-};
-
 // 将一个 inode 写回到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
 int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
   struct super_block *sb = inode->i_sb;
@@ -637,9 +633,9 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   bbi->i_subdir_num = 0;
   // bbi->i_blocks[0] = i_no + NR_DSTORE_BLOCKS; // 新 inode 的第一个数据块号
   memset(bbi->i_blocks, 0, sizeof(bbi->i_blocks));  // 初始化索引数组
-  if (insert_inode_locked(inode) <
-      0) {  // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，并设置 inode
-            // 的 i_state 状态
+  // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，
+  // 并设置 inode 的 i_state 状态
+  if (insert_inode_locked(inode) < 0) {
     printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %lu",
            i_no);
     err = -EIO;
@@ -691,8 +687,9 @@ static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   int ret = 0;
   struct inode *inode;
-  inode_inc_link_count(
-      dir);  // 父目录下添加子目录，需要将父目录的引用计数加一，因为子目录的“..”
+
+  // 因为子目录的“..”指向父目录，故需要将父目录的硬链接计数加一
+  inode_inc_link_count(dir);
   inode = baby_new_inode(dir, S_IFDIR | mode, &dentry->d_name);
   if (IS_ERR(inode)) {
     printk(KERN_ERR "baby_mkdir: get new inode failed!\n");
@@ -727,6 +724,74 @@ out:
   return ret;
 }
 
+/**
+ * @brief 创建一个软（符号）链接文件
+ *
+ * @param dir 链接文件所在目录
+ * @param dentry 链接文件的目录项
+ * @param symname 链接文件存储的源文件路径
+ * @return int
+ */
+static int baby_symlink(struct inode *dir, struct dentry *dentry,
+                        const char *symname) {
+  int err = -ENAMETOOLONG;
+  int l = strlen(symname) + 1; /*源文件路径长度*/
+  struct inode *inode;
+
+  if (l > BABYFS_BLOCK_SIZE)  // 源文件路径长度不能大于一个磁盘块大小
+    goto out;
+
+  inode = baby_new_inode(dir, S_IFLNK | S_IRWXUGO, &dentry->d_name);
+  err = PTR_ERR(inode);
+  if (IS_ERR(inode)) {
+    printk(KERN_ERR "baby_symlink: get new inode failed!\n");
+    goto out;
+  }
+  err = page_symlink(inode, symname, l); // 将文件内容初始化为符号链接路径
+  if (err) {
+    printk(KERN_ERR "baby_symlink: page_symlink failed!\n");
+    goto out_fail;
+  }
+
+  mark_inode_dirty(inode);
+  err = parentdir_add_inode(dentry, inode);
+
+out:
+  return err;
+out_fail:
+  inode_dec_link_count(inode);
+  unlock_new_inode(inode);
+  iput(inode);
+  goto out;
+}
+
+/**
+ * @brief 在父目录 dir 下建立 dentry 到 old_dentry->inode 的硬链接
+ * 
+ * @param old_dentry 现存的目录项
+ * @param dir 新目录项的父目录
+ * @param dentry 新目录项
+ * @return int 
+ */
+static int baby_link(struct dentry *old_dentry, struct inode *dir,
+                     struct dentry *dentry) {
+  struct inode *inode = d_inode(old_dentry); // 获得目标文件的inode
+  int err;
+
+  inode->i_ctime = current_time(inode);
+  inode_inc_link_count(inode); // 目标inode的硬链接计数+1
+  ihold(inode); // 索引节点的引用计数+1
+
+  err = baby_add_link(dentry, inode); // 父目录dentry->parent中新增目录项dentry
+  if (!err) {
+    d_instantiate(dentry, inode);
+    return 0;
+  }
+  printk(KERN_ERR "baby_link: baby_add_link failed!\n");
+  inode_dec_link_count(inode);
+  iput(inode);
+  return err;
+}
 /*
  * 根据父目录和文件名查找 inode，关联目录项；需要从磁盘文件系统根据 ino 读取
  * inode 信息
@@ -747,15 +812,30 @@ struct dentry *baby_lookup(struct inode *dir, struct dentry *dentry,
   }
   return d_splice_alias(inode, dentry);
 }
-
-struct inode_operations baby_dir_inode_operations = {
+struct inode_operations baby_dir_inode_operations = { // 目录文件inode的操作
     .lookup = baby_lookup,  //
     .create = baby_create,  // 新建文件
     .mkdir = baby_mkdir,    // 新建目录
+    //.rmdir = baby_rmdir,    // 删除目录
+    .symlink = baby_symlink, // 新建软链接
+    .link = baby_link, // 新建硬链接
+    //.unlink = baby_unlink, // 删除文件\硬链接
     .getattr = simple_getattr,
 };
 
-struct inode_operations baby_file_inode_operations = {
+struct inode_operations baby_file_inode_operations = { // 普通文件inode的操作
     .getattr = simple_getattr,
     .setattr = simple_setattr,
+};
+
+struct inode_operations baby_symlink_inode_operations = { // 符号链接文件inode的操作
+  .get_link	= page_get_link,
+};
+
+const struct address_space_operations baby_aops = {
+    .readpage = baby_readpage,
+    .writepage = baby_writepage,
+    .writepages = baby_writepages,
+    .write_end = baby_write_end,
+    .write_begin = baby_write_begin,
 };
