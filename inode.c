@@ -64,7 +64,8 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   gid_t i_gid;
   int i;
 
-  // 获取 ino 标志的 inode，若在 inode cache 中直接返回，否则分配一个加锁的 vfs inode
+  // 获取 ino 标志的 inode，若在 inode cache 中直接返回，否则分配一个加锁的 vfs
+  // inode
   vfs_inode = iget_locked(sb, ino);
   if (!vfs_inode) return ERR_PTR(-ENOMEM);
   if (!(vfs_inode->i_state & I_NEW))  // inode cache 中的 inode 可直接使用
@@ -166,8 +167,8 @@ no_block:
   return p;
 }
 
-static int baby_block_to_path(struct inode *inode, long i_block,
-                              int offsets[4]) {
+static int baby_block_to_path(struct inode *inode, long i_block, int offsets[4],
+                              int *boundary) {
   int ptrs = BABYFS_BLOCK_SIZE / sizeof(__u32);  // 每一块可以存放的间接地址数量
   int ptr_bits = 8;                              // ptrs 的对数
   const long direct_blocks = BABYFS_DIRECT_BLOCK, indirect_blocks = ptrs,
@@ -178,51 +179,331 @@ static int baby_block_to_path(struct inode *inode, long i_block,
     printk("baby_block_to_path, i_block < 0");
   } else if (i_block < direct_blocks) {
     offsets[n++] = i_block;
+    final = direct_blocks;
   } else if ((i_block -= direct_blocks) < indirect_blocks) {
     offsets[n++] = BABYFS_PRIMARY_BLOCK;
     offsets[n++] = i_block;
+    final = ptrs;
   } else if ((i_block -= indirect_blocks) < double_blocks) {
     offsets[n++] = BABYFS_SECONDRTY_BLOCK;  // 从二次间接开始
     offsets[n++] = i_block >> ptr_bits;     // i_block / ptrs
     offsets[n++] = i_block & (ptrs - 1);    // i_block % ptrs
+    final = ptrs;
   } else if (((i_block -= double_blocks) >> (ptr_bits * 2)) < ptrs) {
     offsets[n++] = BABYFS_THIRD_BLOCKS;        // 从三次间接开始
     offsets[n++] = i_block >> (ptr_bits * 2);  // i_block / double_blocks
     offsets[n++] = (i_block >> ptr_bits) &
                    (ptrs - 1);  // (i_block % double_blocks) / indirect_blocks
     offsets[n++] = i_block & (ptrs - 1);  // i_blocks % ptrs
+    final = ptrs;
   }
+  // boundary为最后一级索引中从要取的块到最后一块的距离
+  if (boundary) *boundary = final - 1 - (i_block & (ptrs - 1));
   return n;
+}
+
+// *(ind->p) 表示的数据无效，就近找一个可用的数据块
+static unsigned long baby_find_near(struct inode *inode, Indirect *ind) {
+  struct baby_inode_info *inode_info = BABY_I(inode);
+  // 首先把start指向当前所在的映射块的起点，如果没有，则指向ext2_inode_info中的块数组
+  __le32 *start = ind->bh ? (__le32 *)ind->bh->b_data : inode_info->i_blocks;
+  __le32 *p;
+  /*
+   * 1. chain[0] 的数据没有分配，则向左遍历 i_blocks
+   * 2. chain[1] ~ chain[3] 的数据块找不到，在 ind->bh 对应的 block
+   * 中向左寻找可用块
+   */
+  for (p = ind->p - 1; p >= start; --p) {
+    if (*p) return le32_to_cpu(*p);
+  }
+  // 没有找到，就找当前的间接块
+  if (ind->bh) return ind->bh->b_blocknr;
+  // 再没有的话就返回 0，表示接下来不使用 goal
+  return 0;
+}
+
+/*
+ * @block: 逻辑块号
+ * @partial: 指向 chain 数组中出现问题（就是没有找到可用的物理块）的那个元素
+ * 返回目标物理块号，在 goal 附近寻找可用块
+ */
+static inline int baby_find_goal(struct inode *inode, sector_t block,
+                                 Indirect *partial) {
+  struct baby_inode_info *inode_info = BABY_I(inode);
+  // i_next_alloc_block 表示下一次要分配的逻辑块号，i_next_alloc_goal
+  // 表示下一次可以分配的物理块号
+  if (block == inode_info->i_next_alloc_block && inode_info->i_next_alloc_goal)
+    return inode_info->i_next_alloc_goal;
+  // 说明没有指定下一次要分配的物理块，此时从 partial 附近就近找一个块号
+  return baby_find_near(inode, partial);
+}
+
+/*
+ * 计算实际需要分配的直接块数量
+ * @partial: partial 的下一级没有分配数据块
+ */
+static int baby_blks_to_allocate(Indirect *partial, int indirect_blk,
+                                 unsigned long blks_need,
+                                 int blocks_to_boundary) {
+  unsigned long count = 0;
+  if (indirect_blk > 0) {  // partial 表示的不是最后一级间接块
+    count += min(blocks_to_boundary + 1, blks_need);
+    return count;
+  }
+
+  // partial 表示的是最后一级间接块，寻找连续的块
+  count++;
+  while (count < blks_need && count <= blocks_to_boundary &&
+         le32_to_cpu(*(partial[0].p + count)) ==
+             0) {  // partial[0] 就是 partial 自身
+    count++;
+  }
+  return count;
+}
+
+static unsigned long baby_find_next_usable_block(int start,
+                                                 struct buffer_head *bitmap_bh,
+                                                 int end) {
+  unsigned long here, next;
+  if (start > 0) {
+  }
+}
+
+unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
+                              unsigned long *count, int *err) {
+  printk(KERN_INFO "baby_new_blocks------");
+  unsigned long ret_block;
+  struct super_block *sb = inode->i_sb;
+  unsigned long per_block_num = BABYFS_BLOCK_SIZE
+                                << 3;  // 每一块可以表示的数据块个数
+  unsigned long block_bitmap_bno = 0;
+  struct buffer_head *bitmap_bh = NULL;
+  unsigned long first = 0;
+  unsigned long next = 0;
+  unsigned long bitmap_delta = 0;
+
+  // 首先在 goal 附近开始向后寻找可用的块
+  if (goal > 0) {
+    // data_bitmap 起始搜寻块
+    block_bitmap_bno = goal / per_block_num + BABYFS_DATA_BIT_MAP_BLOCK_BASE;
+    goal %= per_block_num;
+    // 一直搜索直到存储数据的数据块为止
+    while (block_bitmap_bno < NR_DSTORE_BLOCKS) {
+      bitmap_bh = sb_bread(sb, block_bitmap_bno);
+      // TODO 还可以进一步优化。
+      // 找到第一个可用的，和第一个不可用的，之间的差值就是可用的数据块数量
+      first = baby_find_next_zero_bit(bitmap_bh->b_data, per_block_num - goal,
+                                      goal);
+      next = baby_find_next_bit((unsigned long *)bitmap_bh->b_data,
+                                per_block_num - first, first) %
+             (per_block_num + 1);
+      if (first) goto got_it;
+      block_bitmap_bno++;
+      brelse(bitmap_bh);
+    }
+  } else {
+    block_bitmap_bno = BABYFS_DATA_BIT_MAP_BLOCK_BASE;
+    while (block_bitmap_bno < NR_DSTORE_BLOCKS) {
+      bitmap_bh = sb_bread(sb, block_bitmap_bno);
+      first = baby_find_first_zero_bit(bitmap_bh->b_data, per_block_num);
+      next = baby_find_next_bit((unsigned long *)bitmap_bh->b_data,
+                                per_block_num - first, first) %
+             (per_block_num + 1);
+      if (first) goto got_it;
+      block_bitmap_bno++;
+      brelse(bitmap_bh);
+    }
+  }
+got_it:
+  if (first) {
+    *count = min(*count, next - first);  // 没有达到预期分配的数量
+    int i;
+    for (i = 0; i < *count; ++i) {
+      baby_set_bit(first + i, bitmap_bh->b_data);
+    }
+    mark_buffer_dirty(bitmap_bh);
+    brelse(bitmap_bh);
+    printk("baby_new_blocks, first: %d, block_bitmap_bno: %d", first,
+           block_bitmap_bno);
+    bitmap_delta = block_bitmap_bno - BABYFS_DATA_BIT_MAP_BLOCK_BASE;
+    return first + bitmap_delta * per_block_num + NR_DSTORE_BLOCKS;
+  }
+  return 0;
+}
+
+static int baby_alloc_blocks(struct inode *inode, unsigned long goal,
+                             int indirect_blks, int blks,
+                             unsigned long new_blocks[4], int *err) {
+  // 目标分配块数，只保证间接块分配完全并且至少分配一块直接块
+  int target = indirect_blks + blks;
+  unsigned long count = 0;
+  unsigned long current_block = 0;
+  unsigned int index = 0;  // new_blocks 数组索引
+  int ret = 0, i = 0;
+  while (1) {
+    count = target;
+    current_block = baby_new_blocks(inode, goal, &count, err);
+    if (*err) {
+      goto failed_out;
+    }
+    target -= count;
+    while (index < indirect_blks && count) {
+      new_blocks[index++] = current_block++;
+      count--;
+    }
+    /*
+     * count >  0 表示间接块已经全部分配了，并且分配了一定数量的直接块
+     * count = 0 表示简介块分配完，但是直接块还没有分配一块
+     */
+    if (count > 0) break;
+  }
+  new_blocks[index] = current_block;  // 直接块起始块号
+  printk("baby_alloc_blocks end, new_blocks[%d]: %d", index, new_blocks[index]);
+  ret = count;  // 直接块的数量
+  return ret;
+
+failed_out:
+  printk(KERN_ERR "baby_alloc_blocks failed_out");
+  for (i = 0; i < index; ++i) {
+    // TODO free_block
+  }
+  if (index) mark_inode_dirty(inode);
+  return ret;
+}
+
+static int baby_alloc_branch(struct inode *inode, int indirect_blks,
+                             unsigned long *blks, unsigned long goal,
+                             int *offsets, Indirect *partial) {
+  /*
+   * 存储分配得到的每一级索引 block 块号，new_blocks
+   * 索引编号越小表示的数据块索引数组级别越高只有 4
+   * 个元素的原因是：最多只有三级索引加上一个直接块，直接块只需要存储起始块号
+   * 因为分配的 block 都是连续的，否则就分配一个数据块
+   * baby_alloc_blocks 会返回分配的数据块的数量
+   */
+  unsigned long new_blocks[4];
+  unsigned long current_block;
+  int err = 0, i = 0;
+  unsigned long num =
+      baby_alloc_blocks(inode, goal, indirect_blks, *blks, new_blocks, &err);
+  if (err) return err;
+
+  partial[0].key = cpu_to_le32(new_blocks[0]);  // partial 下一级索引对应的块号
+  printk("baby_alloc_branch, partial[0].key: %d", partial[0].key);
+  int n = 0;
+  struct buffer_head *bh = NULL;
+  for (n = 1; n <= indirect_blks; ++n) {
+    bh = sb_getblk(inode->i_sb,
+                   new_blocks[n - 1]);  // 读取 partial 的下一级索引块
+    if (unlikely(!bh)) {
+      err = -ENOMEM;
+      goto failed;
+    }
+    partial[n].bh = bh;  // 设置下一级索引的 buffer_head
+    lock_buffer(bh);
+    memset(bh->b_data, 0, BABYFS_BLOCK_SIZE);
+    partial[n].p =
+        (__le32 *)bh->b_data + offsets[n];  // 下一级索引在 bh 块内偏移
+    partial[n].key = cpu_to_le32(new_blocks[n]);  // 设置下一级索引块号
+
+    // partial[indirect_blks] 表示的是一级间接块，因此下面要设置直接块的信息
+    if (n == indirect_blks) {
+      current_block = new_blocks[n];  // 当前直接块的块号
+      int i = 0;
+      for (i = 1; i < num; ++i) {  // 直接块是连续的，填充直接块块号
+        *(partial[n].p + i) = cpu_to_le32(++current_block);
+      }
+    }
+    set_buffer_uptodate(bh);
+    unlock_buffer(bh);
+    mark_buffer_dirty_inode(bh, inode);
+    if (S_ISDIR(inode->i_mode) && IS_DIRSYNC(inode)) sync_dirty_buffer(bh);
+  }
+  *blks = num;  // blks 表示分配的直接块的数量
+  return err;
+
+failed:
+  printk(KERN_ERR "baby_alloc_branch failed");
+  for (i = 1; i < n; ++i) {
+    bforget(partial[i].bh);
+  }
+  for (i = 0; i < indirect_blks; ++i) {
+    // TODO free blocks
+  }
+  return err;
+}
+
+static void baby_splice_branch(struct inode *inode, unsigned long block,
+                               Indirect *partial, int num, int blks) {
+  unsigned long current_block;
+  // 那个迷失的 partial 中迷失的那个位置的数据，它后面的索引都已经在
+  // alloc_branch 中更改完成了
+  *partial->p = partial->key;
+  // 如果一开始迷失的就是一级索引
+  if (!num && blks > 1) {
+    current_block =
+        le32_to_cpu(partial->key) + 1;  // partial->p 在上边已经设置了
+    int i;
+    for (i = 1; i < blks; ++i) {
+      *(partial->p + i) = cpu_to_le32(current_block++);
+    }
+  }
+  // 更新 next_block
+  struct baby_inode_info *inode_info = BABY_I(inode);
+  inode_info->i_next_alloc_block = block + blks - 1;
+  inode_info->i_next_alloc_goal = le32_to_cpu(partial[num].key + blks - 1);
+  if (partial->bh) mark_buffer_dirty_inode(partial->bh, inode);
+  inode->i_ctime = current_time(inode);
+  mark_inode_dirty(inode);
 }
 
 static int baby_get_blocks(struct inode *inode, sector_t block,
                            unsigned long maxblocks, struct buffer_head *bh,
                            int create) {
   int err = -EIO;
-  int offset[4] = {99};      // 存放 block 的索引信息
-  Indirect chain[4];  // 读取索引信息，存放数据
+  int offset[4] = {99};  // 存放 block 的索引信息
+  Indirect chain[4];     // 读取索引信息，存放数据
   Indirect *partial;
+  int blocks_to_boundary =
+      0;  // boundary 为最后一级间接块中从要取的块到最后一块的距离
   // 获取索引深度，直接索引是 0
-  int depth = baby_block_to_path(inode, block, offset);
+  int depth = baby_block_to_path(inode, block, offset, &blocks_to_boundary);
   if (!depth) return err;
-  // 读取索引信息，返回 NULL 表示找到了所有的
-  // printk("depth: %d", depth);
-  // printk("offset[0]: %d, offset[1]: %d, offset[2]: %d, offset[3]: %d", offset[0], offset[1], offset[2], offset[3]);
+
+  printk("depth: %d", depth);
+  printk("offset[0]: %d, offset[1]: %d, offset[2]: %d, offset[3]: %d",
+         offset[0], offset[1], offset[2], offset[3]);
+
+  // 读取索引信息，返回 NULL 表示找到了所有的。partial 不为 NULL 说明 partial
+  // 的下一级没有分配数据块
   partial = baby_get_branch(inode, depth, offset, chain, &err);
-  // TODO 没找到的时候需要怎么做
   if (!partial) {
-    printk(KERN_INFO "chain[depth - 1].key: %d", chain[depth - 1].key);
-    map_bh(bh, inode->i_sb,
-           chain[depth - 1].key);  // chain 的最后一个元素存储的是最后的块号
-    partial = chain + depth - 1;
+    printk(KERN_INFO "partial==NULL, chain[depth - 1].key: %d",
+           chain[depth - 1].key);
     goto got_it;
   }
+  printk(KERN_INFO "partial!=NULL, chain[depth - 1].key: %d",
+         chain[depth - 1].key);
 
-  if(!create || err == -EIO)
-    goto cleanup;
+  if (!create || err == -EIO) goto clean_up;
+
+  /* 开始分配数据块 */
+  unsigned long goal = baby_find_goal(inode, block, partial);
+  unsigned long indirect_blk =
+      chain + depth - partial - 1;  // 计算需要分配的间接块的数量
+  unsigned long count = baby_blks_to_allocate(partial, indirect_blk, maxblocks,
+                                              blocks_to_boundary);
+  err = baby_alloc_branch(inode, indirect_blk, &count, goal,
+                          offset + (partial - chain), partial);
+  if (err) goto clean_up;
+  // 收尾工作，此时的 count 表示直接块的数量
+  baby_splice_branch(inode, block, partial, indirect_blk, count);
 
 got_it:
-cleanup:
+  map_bh(bh, inode->i_sb, le32_to_cpu(chain[depth - 1].key));
+  partial = chain + depth - 1;
+clean_up:
+  printk("clean_up, chain[depth - 1]: %d", chain[depth - 1].key);
   while (partial > chain) {
     brelse(partial->bh);
     partial--;
@@ -246,27 +527,27 @@ static int baby_writepage(struct page *page, struct writeback_control *wbc) {
   return block_write_full_page(page, baby_get_block, wbc);
 }
 
-static int baby_writepages(struct address_space *mapping, struct writeback_control *wbc) {
+static int baby_writepages(struct address_space *mapping,
+                           struct writeback_control *wbc) {
   return mpage_writepages(mapping, wbc, baby_get_block);
 }
 
 static int baby_write_end(struct file *file, struct address_space *mapping,
-			loff_t pos, unsigned len, unsigned copied,
-			struct page *page, void *fsdata) {
+                          loff_t pos, unsigned len, unsigned copied,
+                          struct page *page, void *fsdata) {
   int ret;
 
-	ret = generic_write_end(file, mapping, pos, len, copied, page, fsdata);
+  ret = generic_write_end(file, mapping, pos, len, copied, page, fsdata);
   // TODO if (ret < 0)
-	return ret;
+  return ret;
 }
 
 static int baby_write_begin(struct file *file, struct address_space *mapping,
-		loff_t pos, unsigned len, unsigned flags,
-		struct page **pagep, void **fsdata) {
+                            loff_t pos, unsigned len, unsigned flags,
+                            struct page **pagep, void **fsdata) {
   int ret;
 
-	ret = block_write_begin(mapping, pos, len, flags, pagep,
-				baby_get_block);
+  ret = block_write_begin(mapping, pos, len, flags, pagep, baby_get_block);
   // TODO if (ret < len)
   return ret;
 }
@@ -343,8 +624,8 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
     err = -ENOSPC;
     goto fail;
   }
-  
-  baby_set_bit(i_no, bh_bitmap->b_data); // 占用这一位
+
+  baby_set_bit(i_no, bh_bitmap->b_data);  // 占用这一位
   mark_buffer_dirty(bh_bitmap);
   brelse(bh_bitmap);
 
@@ -356,8 +637,11 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   bbi->i_subdir_num = 0;
   // bbi->i_blocks[0] = i_no + NR_DSTORE_BLOCKS; // 新 inode 的第一个数据块号
   memset(bbi->i_blocks, 0, sizeof(bbi->i_blocks));  // 初始化索引数组
-  if (insert_inode_locked(inode) < 0) { // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，并设置 inode 的 i_state 状态
-    printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %lu", i_no);
+  if (insert_inode_locked(inode) <
+      0) {  // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，并设置 inode
+            // 的 i_state 状态
+    printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %lu",
+           i_no);
     err = -EIO;
     goto fail;
   }
@@ -382,7 +666,7 @@ static inline int parentdir_add_inode(struct dentry *dentry,
     d_instantiate_new(dentry, inode);  // 将 inode 与 dentry 相关联
     return 0;
   }
-  
+
   printk(KERN_ERR "parentdir_add_inode:baby_add_link failed!\n");
   inode_dec_link_count(inode);
   unlock_new_inode(inode);
@@ -407,21 +691,22 @@ static int baby_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   int ret = 0;
   struct inode *inode;
-  inode_inc_link_count(dir); // 父目录下添加子目录，需要将父目录的引用计数加一，因为子目录的“..”
+  inode_inc_link_count(
+      dir);  // 父目录下添加子目录，需要将父目录的引用计数加一，因为子目录的“..”
   inode = baby_new_inode(dir, S_IFDIR | mode, &dentry->d_name);
   if (IS_ERR(inode)) {
     printk(KERN_ERR "baby_mkdir: get new inode failed!\n");
     ret = PTR_ERR(inode);
     goto out;
   }
-  inode_inc_link_count(inode); // 新增的子目录引用计数为 2
+  inode_inc_link_count(inode);        // 新增的子目录引用计数为 2
   ret = baby_make_empty(inode, dir);  // 增加 . 和 .. 目录项
-  if(ret) {
+  if (ret) {
     printk(KERN_ERR "baby_mkdir:add . and .. failed!\n");
     goto link_fail;
   }
   mark_inode_dirty(inode);
-  
+
   ret = baby_add_link(dentry, inode);
   if (ret) {
     printk(KERN_ERR "baby_mkdir:baby_add_link failed!\n");
@@ -432,7 +717,7 @@ static int baby_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
   printk("d_instance");
   return 0;
 
-link_fail: // 释放子目录的 inode
+link_fail:  // 释放子目录的 inode
   inode_dec_link_count(inode);
   inode_dec_link_count(inode);
   unlock_new_inode(inode);
@@ -442,25 +727,23 @@ out:
   return ret;
 }
 
-
-
-/* 
- * 根据父目录和文件名查找 inode，关联目录项；需要从磁盘文件系统根据 ino 读取 inode 信息
+/*
+ * 根据父目录和文件名查找 inode，关联目录项；需要从磁盘文件系统根据 ino 读取
+ * inode 信息
  */
 struct dentry *baby_lookup(struct inode *dir, struct dentry *dentry,
                            unsigned int flags) {
   // printk(KERN_INFO "lookup调用");
   struct inode *inode;
   unsigned int ino;
-  if(dentry->d_name.len > BABYFS_FILENAME_MAX_LEN)
+  if (dentry->d_name.len > BABYFS_FILENAME_MAX_LEN)
     return ERR_PTR(-ENAMETOOLONG);
   // 从父 inode 中根据文件名查找 ino
   ino = baby_inode_by_name(dir, &dentry->d_name);
   inode = NULL;
-  if(ino) {
+  if (ino) {
     inode = baby_iget(dir->i_sb, ino);
-    if (inode == ERR_PTR(-ESTALE))
-      return ERR_PTR(-EIO);
+    if (inode == ERR_PTR(-ESTALE)) return ERR_PTR(-EIO);
   }
   return d_splice_alias(inode, dentry);
 }

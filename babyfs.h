@@ -117,6 +117,8 @@ struct baby_inode_info {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   struct inode vfs_inode;
+  __u32 i_next_alloc_block;         /* 下一次分配文件内逻辑块号 */
+  __u32 i_next_alloc_goal;          /* 下一次分配物理块号 */
 };
 
 // 从 vfs inode 返回包含他的 baby_inode_info
@@ -153,7 +155,9 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
 #define baby_clear_bit __clear_bit_le  // set 0
 #define baby_test_bit test_bit_le
 #define baby_find_first_zero_bit find_first_zero_bit_le
+#define baby_find_first_bit find_first_bit
 #define baby_find_next_zero_bit find_next_zero_bit_le
+#define baby_find_next_bit  find_next_bit
 #endif
 
 #endif
