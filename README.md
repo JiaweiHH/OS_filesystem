@@ -51,6 +51,29 @@ make umount
 
 《深入理解 Linux 内核》
 
+## 测试
+
+当挂在的文件系统为 50M 时，分布如下
+
+```
+64行/块，
+/*
+ * babyfs partition layout
+ * +---------------+
+ * |  superblock   |  1 block，0，2-65
+ * +---------------+
+ * |  inode bitmap |  1 block，1，66-129
+ * +---------------+
+ * |  inode table  |  1024 block，2-1025，130-65665
+ * +---------------+
+ * | block bitmap  |  6 block，1026-1031，65666-66049
+ * +---------------+
+ * |    data       |
+ * |      blocks   |  1032- ，rest of the blocks
+ * +---------------+
+ */
+```
+
 API
 
 [https://www.debugger.wiki/article/html/1558843231417175](https://www.debugger.wiki/article/html/1558843231417175)

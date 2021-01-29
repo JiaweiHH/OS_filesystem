@@ -744,7 +744,7 @@ static int baby_symlink(struct inode *dir, struct dentry *dentry,
     printk(KERN_ERR "baby_symlink: get new inode failed!\n");
     goto out;
   }
-  err = page_symlink(inode, symname, l); // 将文件内容初始化为符号链接路径
+  err = page_symlink(inode, symname, l);  // 将文件内容初始化为符号链接路径
   if (err) {
     printk(KERN_ERR "baby_symlink: page_symlink failed!\n");
     goto out_fail;
@@ -764,22 +764,22 @@ out_fail:
 
 /**
  * @brief 在父目录 dir 下建立 dentry 到 old_dentry->inode 的硬链接
- * 
+ *
  * @param old_dentry 现存的目录项
  * @param dir 新目录项的父目录
  * @param dentry 新目录项
- * @return int 
+ * @return int
  */
 static int baby_link(struct dentry *old_dentry, struct inode *dir,
                      struct dentry *dentry) {
-  struct inode *inode = d_inode(old_dentry); // 获得目标文件的inode
+  struct inode *inode = d_inode(old_dentry);  // 获得目标文件的inode
   int err;
 
   inode->i_ctime = current_time(inode);
-  inode_inc_link_count(inode); // 目标inode的硬链接计数+1
-  ihold(inode); // 索引节点的引用计数+1
+  inode_inc_link_count(inode);  // 目标inode的硬链接计数+1
+  ihold(inode);                 // 索引节点的引用计数+1
 
-  err = baby_add_link(dentry, inode); // 父目录dentry->parent中新增目录项dentry
+  err = baby_add_link(dentry, inode);  // 父目录dentry->parent中新增目录项dentry
   if (!err) {
     d_instantiate(dentry, inode);
     return 0;
@@ -836,24 +836,109 @@ struct dentry *baby_lookup(struct inode *dir, struct dentry *dentry,
   }
   return d_splice_alias(inode, dentry);
 }
-struct inode_operations baby_dir_inode_operations = { // 目录文件inode的操作
+
+/*
+ * @old_dir: 待移动文件的父目录 inode
+ * @old_dentry: 旧的目录项，待移动的文件
+ * @new_dir: 目的地的目录 inode
+ * @new_dentry: 新的目录项，目的地文件
+ */
+static int baby_rename(struct inode *old_dir, struct dentry *old_dentry,
+                       struct inode *new_dir, struct dentry *new_dentry,
+                       unsigned int flags) {
+  struct inode *old_inode = d_inode(old_dentry);
+  struct inode *new_inode = d_inode(new_dentry);
+  int err;
+  // 获取待移动文件的磁盘目录项
+  struct page *old_page = NULL;
+  struct dir_record *old_de =
+      baby_find_entry(old_dir, &old_dentry->d_name, &old_page);
+  if (!old_de) {
+    err = -ENOENT;
+    goto out;
+  }
+  // 判断待移动的是不是一个目录文件，并获取 ".." 磁盘数据目录项
+  struct page *dir_page = NULL;
+  struct dir_record *dotdot_de = NULL;
+  if (S_ISDIR(old_inode->i_mode)) {
+    err = -EIO;
+    dotdot_de = baby_dotdot(old_inode, &dir_page);
+    if (!dotdot_de) goto out_old;
+  }
+  struct dir_record *new_de = NULL;
+  if (new_inode) {  // 目的地文件存在，覆盖它
+    struct page *new_page = NULL;
+    // 获取待覆盖的目录项
+    new_de = baby_find_entry(new_dir, &new_dentry->d_name, &new_page);
+    if (!new_de) goto out_dir;
+    // 设置 new_de 的 inode_no 和 type 都和 old_inode 相同
+    baby_set_link(new_dir, new_de, new_page, old_inode, 1);
+    new_inode->i_ctime = current_time(new_inode);
+    // 由于 ".." 存在，因此待覆盖目录中的 "." 指向的不再是 new_inode
+    if(dotdot_de)
+      drop_nlink(new_inode);
+    // 待覆盖目录项的 inode_no 不再是 new_inode
+    inode_dec_link_count(new_inode);
+  } else {  // 目的地文件不存在，只是简单的重命名
+    err = baby_add_link(new_dentry, old_inode);
+    if(err)
+      goto out_dir;
+    // 原文件的 ".." 目录项存在，因此会变成指向目的地的父目录
+    if(dotdot_de)
+      inode_inc_link_count(new_dir);
+  }
+
+  old_inode->i_ctime = current_time(old_inode);
+  mark_inode_dirty(old_inode);
+  // 从父目录中删除原来的目录项
+  baby_delete_entry(old_de, old_page);
+
+  // 如果是目录文件，需要将 ".." 指向新的父目录
+  if(dir_de) {
+    if(old_dir != new_dir)
+      baby_set_link(old_inode, dotdot_de, dir_page, new_dir, 0);
+    else {
+      kunmap(dir_page);
+      put_page(dir_page);
+    }
+    inode_dec_link_count(old_dir);  // 对于旧目录来说少了一个 ".." 的链接
+  }
+  return 0;
+
+out_dir:
+  if(dir_de) {
+    kunmap(dir_page);
+    put_page(dir_page);
+  }
+out_old:
+  kunmap(old_page);
+	put_page(old_page);
+out:
+  return err;
+}
+
+struct inode_operations baby_dir_inode_operations = {
+    // 目录文件inode的操作
     .lookup = baby_lookup,  //
     .create = baby_create,  // 新建文件
     .mkdir = baby_mkdir,    // 新建目录
     //.rmdir = baby_rmdir,    // 删除目录
-    .symlink = baby_symlink, // 新建软链接
-    .link = baby_link, // 新建硬链接
-    .unlink = baby_unlink, // 删除文件\硬链接的目录项
+    .symlink = baby_symlink,  // 新建软链接
+    .link = baby_link,        // 新建硬链接
+    .unlink = baby_unlink, // 删除文件\硬链接
+    .rename = baby_rename,
     .getattr = simple_getattr,
 };
 
-struct inode_operations baby_file_inode_operations = { // 普通文件inode的操作
+struct inode_operations baby_file_inode_operations = {
+    // 普通文件inode的操作
     .getattr = simple_getattr,
     .setattr = simple_setattr,
 };
 
-struct inode_operations baby_symlink_inode_operations = { // 符号链接文件inode的操作
-  .get_link	= page_get_link,
+struct inode_operations baby_symlink_inode_operations = {
+    // 符号链接文件inode的操作
+    .get_link = page_get_link,
 };
 
 const struct address_space_operations baby_aops = {

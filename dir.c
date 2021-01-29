@@ -5,6 +5,36 @@
 
 #include "babyfs.h"
 
+// 获取 ".." 磁盘目录项
+struct dir_record *baby_dotdot(struct inode *dir, struct page **p) {
+  struct page *page = baby_get_page(dir, 0);
+  struct dir_record *de = NULL;
+  if (!IS_ERR(page)) {
+    de = (struct dir_record *)page_address(page);
+    *p = page;
+  }
+  return de;
+}
+
+// @de: dir 中的一个磁盘目录项数据结构
+// @page: dir 中存储 de 的那一页
+void baby_set_link(struct inode *dir, struct dir_record *de, struct page *page,
+                   struct inode *inode, int update_times) {
+  // 获取 de 在 dir 中的偏移
+  loff_t pos = page_offset(page) + (char *)de - (char *)page_address(page);
+  int err;
+  // 写数据
+  lockpage(page);
+  err = baby_prepare_chunk(page, pos, de->name_len);
+  de->inode_no = cpu_to_le32(inode->i_ino);
+  baby_set_de_type(de, inode);
+  err = baby_commit_chunk(page, pos, de->name_len);
+  baby_put_page(page);
+  if(update_times)
+    dir->i_mtime = dir->i_ctime = current_time(dir);
+  mark_inode_dirty(dir);
+}
+
 // 根据 inode 和页索引找到 page
 static struct page *baby_get_page(struct inode *dir, int n) {
   struct address_space *as = dir->i_mapping;

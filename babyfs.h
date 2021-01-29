@@ -117,8 +117,8 @@ struct baby_inode_info {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   struct inode vfs_inode;
-  __u32 i_next_alloc_block;         /* 下一次分配文件内逻辑块号 */
-  __u32 i_next_alloc_goal;          /* 下一次分配物理块号 */
+  __u32 i_next_alloc_block; /* 下一次分配文件内逻辑块号 */
+  __u32 i_next_alloc_goal;  /* 下一次分配物理块号 */
 };
 
 // 从 vfs inode 返回包含他的 baby_inode_info
@@ -129,11 +129,20 @@ static inline struct baby_inode_info *BABY_I(struct inode *inode) {
 /* dir.c */
 extern int baby_add_link(struct dentry *dentry, struct inode *inode);
 extern const struct file_operations baby_dir_operations;
-extern unsigned int baby_inode_by_name(struct inode *dir, const struct qstr *child);
+extern unsigned int baby_inode_by_name(struct inode *dir,
+                                       const struct qstr *child);
 extern int baby_make_empty(struct inode *inode, struct inode *parent);
 extern int baby_delete_entry(struct dir_record *de, struct page *page);
 extern struct dir_record *baby_find_entry(struct inode *dir,
                                           const struct qstr *child, struct page **res_page);
+extern struct page *baby_get_page(struct inode *dir, int n);
+extern int baby_prepare_chunk(struct page *page, loff_t pos, unsigned len);
+extern int baby_commit_chunk(struct page *page, loff_t pos, unsigned len);
+extern void baby_set_de_type(struct dir_record *de, struct inode *inode);
+extern inline void baby_put_page(struct page *page);
+extern void baby_set_link(struct inode *dir, struct dir_record *de, struct page *page,
+                   struct inode *inode, int update_times);
+extern struct dir_record *baby_dotdot(struct inode *dir, struct page **p);
 
 /* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);
@@ -160,7 +169,7 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
 #define baby_find_first_zero_bit find_first_zero_bit_le
 #define baby_find_first_bit find_first_bit
 #define baby_find_next_zero_bit find_next_zero_bit_le
-#define baby_find_next_bit  find_next_bit
+#define baby_find_next_bit find_next_bit
 #endif
 
 #endif
