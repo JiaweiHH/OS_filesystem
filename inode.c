@@ -894,7 +894,7 @@ static int baby_rename(struct inode *old_dir, struct dentry *old_dentry,
   baby_delete_entry(old_de, old_page);
 
   // 如果是目录文件，需要将 ".." 指向新的父目录
-  if(dir_de) {
+  if(dotdot_de) {
     if(old_dir != new_dir)
       baby_set_link(old_inode, dotdot_de, dir_page, new_dir, 0);
     else {
@@ -906,7 +906,7 @@ static int baby_rename(struct inode *old_dir, struct dentry *old_dentry,
   return 0;
 
 out_dir:
-  if(dir_de) {
+  if(dotdot_de) {
     kunmap(dir_page);
     put_page(dir_page);
   }

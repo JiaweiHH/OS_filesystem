@@ -24,7 +24,7 @@ void baby_set_link(struct inode *dir, struct dir_record *de, struct page *page,
   loff_t pos = page_offset(page) + (char *)de - (char *)page_address(page);
   int err;
   // 写数据
-  lockpage(page);
+  lock_page(page);
   err = baby_prepare_chunk(page, pos, de->name_len);
   de->inode_no = cpu_to_le32(inode->i_ino);
   baby_set_de_type(de, inode);
@@ -36,7 +36,7 @@ void baby_set_link(struct inode *dir, struct dir_record *de, struct page *page,
 }
 
 // 根据 inode 和页索引找到 page
-static struct page *baby_get_page(struct inode *dir, int n) {
+struct page *baby_get_page(struct inode *dir, int n) {
   struct address_space *as = dir->i_mapping;
   struct page *page = read_mapping_page(as, n, NULL);
   if (!IS_ERR(page)) {
@@ -45,7 +45,7 @@ static struct page *baby_get_page(struct inode *dir, int n) {
   return page;
 }
 
-static inline void baby_put_page(struct page *page) {
+inline void baby_put_page(struct page *page) {
   kunmap(page);
   put_page(page);
 }
@@ -64,11 +64,11 @@ static unsigned baby_last_byte(struct inode *inode, unsigned long page_nr) {
  * 3. 根据 page->index 计算文件内的逻辑块号，并与 bh 绑定
  * 4. 同步 [from, to] 之间的数据
  */
-static int baby_prepare_chunk(struct page *page, loff_t pos, unsigned len) {
+int baby_prepare_chunk(struct page *page, loff_t pos, unsigned len) {
   return __block_write_begin(page, pos, len, baby_get_block);
 }
 
-static int baby_commit_chunk(struct page *page, loff_t pos, unsigned len) {
+int baby_commit_chunk(struct page *page, loff_t pos, unsigned len) {
   struct address_space *mapping = page->mapping;
   struct inode *dir = mapping->host;
   int err = 0;
