@@ -817,6 +817,23 @@ out:
   return err;
 }
 
+/*删除目录，dir 是删除的目录的父目录，dentry 是待删除的目录的 dentry*/
+static int baby_rmdir (struct inode * dir, struct dentry *dentry)
+{
+  struct inode * inode = d_inode(dentry); // 待删除文件 inode
+  int err = -ENOTEMPTY;
+
+  if (baby_empty_dir(inode)) { // 检查待删除的目录是否为空，只有空的目录才能被删除
+    err = baby_unlink(dir, dentry); // 从父目录中删除自身的目录项
+    if (!err) { /*把目标文件大小置为0，减少引用计数*/
+      inode->i_size = 0;
+      inode_dec_link_count(inode);
+      inode_dec_link_count(dir); // 子目录的“..”指向父目录
+    }
+  }
+  return err;
+}
+
 /*
  * 根据父目录和文件名查找 inode，关联目录项；需要从磁盘文件系统根据 ino 读取
  * inode 信息
@@ -922,7 +939,7 @@ struct inode_operations baby_dir_inode_operations = {
     .lookup = baby_lookup,  //
     .create = baby_create,  // 新建文件
     .mkdir = baby_mkdir,    // 新建目录
-    //.rmdir = baby_rmdir,    // 删除目录
+    .rmdir = baby_rmdir,    // 删除目录
     .symlink = baby_symlink,  // 新建软链接
     .link = baby_link,        // 新建硬链接
     .unlink = baby_unlink, // 删除文件\硬链接

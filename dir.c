@@ -306,7 +306,7 @@ fail:
 int baby_delete_entry (struct dir_record * de, struct page * page)
 {
   struct inode *inode = page->mapping->host;
-  loff_t pos = (char*)de;
+  loff_t pos = page_offset(page) + (char *)de - (char *)page_address(page);
   int err;
 
   lock_page(page);
@@ -323,7 +323,50 @@ int baby_delete_entry (struct dir_record * de, struct page * page)
   return err;
 }
 
+/*检查一个目录是不是空的，inode是要检查的目录的inode结构体，空=1 */
+int baby_empty_dir (struct inode * inode) {
+  struct page *page = NULL;
+  unsigned long i, npages = dir_pages(inode);
+
+  for (i = 0; i < npages; i++) { /*遍历目录的每一个页*/
+    char *kaddr;
+    struct dir_record * de;
+    page = baby_get_page(inode, i); /*获得遍历到的当前页*/
+    if (IS_ERR(page)) {
+      printk(KERN_ERR "baby_empty_dir: baby_get_page err!\n");
+      break;
+    }
+
+    kaddr = page_address(page);
+    de = (struct dir_record *)kaddr;
+    kaddr += baby_last_byte(inode, i);
+
+    while ((char *)de < kaddr) { // 遍历页内的所有目录项
+      if (de->inode_no != 0) { // 检查有效项
+        /* check for . and .. */
+        if (de->name[0] != '.') // 不是以.开头的必有效
+					goto not_empty;
+				if (de->name_len > 2) // 以.开头的长度大于2的有效
+					goto not_empty;
+				if (de->name_len < 2) { // name = .
+					if (de->inode_no != cpu_to_le32(inode->i_ino))
+						goto not_empty;
+				} else if (de->name[1] != '.') // 第一个为.且name_len为2且第二个不是.也有效
+					goto not_empty;
+      }
+      de++;
+    }
+    baby_put_page(page);
+  }
+  return 1;
+
+not_empty:
+  baby_put_page(page);
+  return 0;
+}
+
 const struct file_operations baby_dir_operations = {
-    .read = generic_read_dir,
-    .iterate_shared = baby_iterate,
+    .read           = generic_read_dir,   // 读目录文件
+    .iterate_shared = baby_iterate,       // 遍历目录项
+    .fsync          = generic_file_fsync  // 异步同步目录内容
 };

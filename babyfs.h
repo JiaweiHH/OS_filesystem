@@ -143,6 +143,7 @@ extern inline void baby_put_page(struct page *page);
 extern void baby_set_link(struct inode *dir, struct dir_record *de, struct page *page,
                    struct inode *inode, int update_times);
 extern struct dir_record *baby_dotdot(struct inode *dir, struct page **p);
+extern int baby_empty_dir (struct inode * inode);
 
 /* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);
