@@ -131,6 +131,9 @@ extern int baby_add_link(struct dentry *dentry, struct inode *inode);
 extern const struct file_operations baby_dir_operations;
 extern unsigned int baby_inode_by_name(struct inode *dir, const struct qstr *child);
 extern int baby_make_empty(struct inode *inode, struct inode *parent);
+extern int baby_delete_entry(struct dir_record *de, struct page *page);
+extern struct dir_record *baby_find_entry(struct inode *dir,
+                                          const struct qstr *child, struct page **res_page);
 
 /* inode.c */
 extern struct inode *baby_iget(struct super_block *, unsigned long);

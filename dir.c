@@ -1,275 +1,299 @@
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
+#include <linux/iversion.h>
 #include <linux/pagemap.h>
 
 #include "babyfs.h"
 
-#define ADD_DIR 0
-#define FIND_FIR 1
-
-static struct work_extra_arg_fillctx {
-  struct dir_context *ctx;
-  struct baby_inode_info *inode_info;
-};
-
-static struct work_extra_arg_addlink { struct dir_record **record; };
-
-static struct baby_walk_struct {
-  __u32 block;
-  int level;
-  struct super_block *sb;
-  void *work_extra_arg;  // work 函数的额外参数
-  void (*work)(__u32, struct super_block *, void *);  // work 函数
-  bool (*terminate)(void *);                          // walk 终止条件
-};
-
-// 从 inode 中读取 inode 类型
-static inline unsigned char dt_type(struct inode *inode) {
-  return (inode->i_mode >> 12) & 15;
+// 根据 inode 和页索引找到 page
+static struct page *baby_get_page(struct inode *dir, int n) {
+  struct address_space *as = dir->i_mapping;
+  struct page *page = read_mapping_page(as, n, NULL);
+  if (!IS_ERR(page)) {
+    kmap(page);
+  }
+  return page;
 }
 
-// addlink 判断终止
-bool termi_addlink(void *arg) {
-  if (arg) return true;
-  return false;
+static inline void baby_put_page(struct page *page) {
+  kunmap(page);
+  put_page(page);
 }
 
-// 索引遍历终止判断，找到所有的字节点为止
-bool termi_fillctx(void *work_extra_arg) {
-  struct work_extra_arg_fillctx *work_extra_arg_fillctx =
-      (struct work_extra_arg_fillctx *)work_extra_arg;
-  struct dir_context *ctx = work_extra_arg_fillctx->ctx;
-  struct baby_inode_info *inode_info = work_extra_arg_fillctx->inode_info;
-  return (ctx->pos >= inode_info->i_subdir_num + 2);
+// 获取当前页面的最后地址
+static unsigned baby_last_byte(struct inode *inode, unsigned long page_nr) {
+  unsigned last_byte = inode->i_size;
+  last_byte -= page_nr << PAGE_SHIFT;
+  return last_byte > PAGE_SIZE ? PAGE_SIZE : last_byte;
 }
 
-// 寻找一个空闲的目录项
-static void do_get_free_record(__u32 block, struct super_block *sb,
-                               void *work_extra_arg) {
-  struct work_extra_arg_addlink *work_extra_arg_addlink =
-      (struct work_extra_arg_addlink *)work_extra_arg;
-  struct dir_record **p_record = work_extra_arg_addlink->record;
-  // 读取数据块
-  struct buffer_head *bh = sb_bread(sb, block);
-  // 开始查找目录项
-  struct dir_record *record = (struct dir_record *)bh->b_data;
-  int loop;
-  for (; loop < BABYFS_BLOCK_SIZE; loop += BABYFS_DIR_RECORD_SIZE, ++record) {
-    if (record->name_len == 0) break;
-  }
-  *p_record = (void *)record;
-  brelse(bh);
+/*
+ * 直接调用 __block_write_begin，保证写数据的时候先和磁盘同步，避免数据覆盖
+ * 1. 通过 page 创建一个 bh
+ * 2. 根据 pos 和 rec_len 计算要写的数据区间 [from, to]
+ * 3. 根据 page->index 计算文件内的逻辑块号，并与 bh 绑定
+ * 4. 同步 [from, to] 之间的数据
+ */
+static int baby_prepare_chunk(struct page *page, loff_t pos, unsigned len) {
+  return __block_write_begin(page, pos, len, baby_get_block);
 }
 
-// 查找父目录的所有子目录项
-static void do_fill_ctx(__u32 block, struct super_block *sb,
-                        void *work_extra_arg) {
-  struct work_extra_arg_fillctx *work_extra_arg_fillctx =
-      (struct work_extra_arg_fillctx *)work_extra_arg;
-  struct dir_context *ctx = work_extra_arg_fillctx->ctx;
-  struct baby_inode_info *inode_info = work_extra_arg_fillctx->inode_info;
-  // 读取数据块
-  struct buffer_head *bh = sb_bread(sb, block);
-  // 开始查找目录项
-  struct dir_record *record = (struct dir_record *)bh->b_data;
-  int loop_size = 0;
-  for (; loop_size < BABYFS_BLOCK_SIZE;
-       loop_size += BABYFS_DIR_RECORD_SIZE, ++record) {
-    if (record->name_len == 0) {
-      continue;
-    }
-    if (!dir_emit(ctx, record->name, record->name_len,
-                  le32_to_cpu(record->inode_no), DT_DIR)) {
-      goto end;
-    }
-    ctx->pos++;
-    if (ctx->pos >= inode_info->i_subdir_num + 2) {
-      goto end;
-    }
+static int baby_commit_chunk(struct page *page, loff_t pos, unsigned len) {
+  struct address_space *mapping = page->mapping;
+  struct inode *dir = mapping->host;
+  int err = 0;
+  inode_inc_iversion(dir);
+  block_write_end(NULL, mapping, pos, len, len, page,
+                  NULL);  // 标记在 [from, to] 区间内的 bh 为脏
+
+  if (pos + len > dir->i_size) {
+    i_size_write(dir, pos + len);
+    mark_inode_dirty(dir);
   }
-end:
-  brelse(bh);
+  err = write_one_page(page);  // 调用 aops->writepage，函数执行结束 page 被解锁
+  if (!err) sync_inode_metadata(dir, 1);  // 将 inode 写到磁盘
+  return err;
 }
 
-// 索引遍历
-static void walk_index(struct baby_walk_struct *walk_struct) {
-  struct super_block *sb = walk_struct->sb;
-  int level = walk_struct->level;
-  struct buffer_head *bh = sb_bread(sb, walk_struct->block);
-  __u32 *dblock = (__u32 *)bh->b_data;
-  char *limit = (char *)dblock + BABYFS_BLOCK_SIZE;
-  while (*dblock && (char *)dblock < limit) {
-    if (level == 1)
-      walk_struct->work(*dblock, sb, walk_struct->work_extra_arg);
-    else {
-      walk_struct->block = *dblock;
-      walk_struct->level = level - 1;
-      walk_index(walk_struct);
-    }
-
-    if (walk_struct->terminate(walk_struct->work_extra_arg)) {
-      brelse(bh);
-      return;
-    }
-    dblock++;
-  }
+void baby_set_de_type(struct dir_record *de, struct inode *inode) {
+  de->file_type = 0;
+  if (S_ISDIR(inode->i_mode))
+    de->file_type = S_IFDIR;
+  else if (S_ISREG(inode->i_mode))
+    de->file_type = S_IFREG;
+  return;
 }
 
-// 在父目录中添加一个目录项
-int baby_add_link(struct dentry *dentry, struct inode *inode) {
-  struct inode *dir = d_inode(dentry->d_parent);  // 获取父目录的 inode
-  struct super_block *sb = dir->i_sb;
-  struct dir_record *record = NULL;
-  __u32 block = 0, loop;
-  struct baby_inode_info *dir_inode_info = BABY_I(dir);  // 获取 inode_info
-  struct work_extra_arg_addlink work_extra_arg_addlink = {.record = &record};
-
-  // 直接块中查找空闲的目录项
-  for (loop = 0; loop < BABYFS_DIRECT_BLOCK; ++loop) {
-    block = dir_inode_info->i_blocks[loop];
-    do_get_free_record(block, sb, &work_extra_arg_addlink);
-    if (record) goto find_record;
-  }
-  // 直接块没有找到 && 有一级索引存在
-  struct baby_walk_struct walk_struct = {
-      .block = dir_inode_info->i_blocks[BABYFS_PRIMARY_BLOCK],
-      .level = 1,
-      .sb = sb,
-      .work_extra_arg = &work_extra_arg_addlink,
-      .work = do_get_free_record,
-      .terminate = termi_addlink};
-  walk_struct.block = dir_inode_info->i_blocks[BABYFS_PRIMARY_BLOCK];
-  if (!record && dir_inode_info->i_blocks[BABYFS_PRIMARY_BLOCK]) {
-    walk_index(&walk_struct);
-    if (record) goto find_record;
-  }
-
-  // 二级、三级同理
-  walk_struct.level = 2;
-  walk_struct.block = dir_inode_info->i_blocks[BABYFS_SECONDRTY_BLOCK];
-  if (!record && dir_inode_info->i_blocks[BABYFS_SECONDRTY_BLOCK]) {
-    walk_index(&walk_struct);
-    if (record) goto find_record;
-  }
-  walk_struct.level = 3;
-  walk_struct.block = dir_inode_info->i_blocks[BABYFS_THIRD_BLOCKS];
-  if (!record && dir_inode_info->i_blocks[BABYFS_THIRD_BLOCKS]) {
-    walk_index(&walk_struct);
-    if (record) goto find_record;
-  }
-
-  return 0;
-
-find_record:
-  record->name_len = dentry->d_name.len;
-  strcpy(record->name, dentry->d_name.name);
-  record->inode_no = cpu_to_le32(inode->i_ino);
-  record->file_type = dt_type(inode);
-  dir->i_mtime = dir->i_ctime = BABYFS_CURRENT_TIME;  // 更新时间
-  mark_inode_dirty(dir);  // 标记父目录的 inode 为脏
-  return 0;
-}
-
-// 目录遍历函数
-int baby_iterate(struct file *dir, struct dir_context *ctx) {
-  struct inode *inode = file_inode(dir);
-  // 检查文件是不是目录
-  if (!S_ISDIR(inode->i_mode)) {
-    return -ENOTDIR;
-  }
-  // 获取超级块和磁盘存储的 inode 结构体
-  struct super_block *sb = inode->i_sb;
-  struct baby_inode_info *inode_info = BABY_I(inode);
-  // 检查是不是超过最大数量了
-  if (ctx->pos >= inode_info->i_subdir_num + 2) {
-    printk("ctx->pos: %lld, 超出\n", ctx->pos);
+static inline int baby_match(int len, const char * const name,
+          struct dir_record *de){
+  if(len != de->name_len)
     return 0;
+  if(!de->inode_no)
+    return 0;
+  return !memcmp(name, de->name, len);
+}
+
+/*
+ * 添加一个磁盘目录项
+ * @dentry. 待添加的目录项
+ * @inode. 待添加目录项的 inode
+ * 此时 inode 和 dentry 还没有建立联系，因此要传递两个参数
+ */
+int baby_add_link(struct dentry *dentry, struct inode *inode) {
+  struct inode *dir = d_inode(dentry->d_parent);  // 父目录 inode
+  const char *name = dentry->d_name.name;         // 目录项的 name
+  int namelen = dentry->d_name.len;               // 目录项 namelen
+  unsigned long npages = dir_pages(dir);          // 父目录的页数
+  loff_t pos;
+  struct dir_record *de;
+  unsigned long nloop = 0;
+  struct page *page;
+  char *kaddr;
+  unsigned short rec_len;
+  int err = 0;
+  /* 开始查找空闲的目录项 */
+  for (nloop = 0; nloop <= npages; ++nloop) {
+    page = baby_get_page(dir, nloop);  // 按编号查找 page
+    if (IS_ERR(page)) goto out;
+    lock_page(page);
+    kaddr = page_address(page);  // page 起始地址
+    char *dir_end =
+        kaddr +
+        baby_last_byte(dir, nloop);  // 当前页面的最后地址，page 可能不满一页
+                                     // last_byte 正常情况下返回 BLOCK_SIZE
+    de = (struct dir_record *)kaddr;
+    while ((char *)de < kaddr + PAGE_SIZE) {
+      // 到达 i_size
+      if ((char *)de == dir_end) {
+        rec_len = BABYFS_BLOCK_SIZE;
+        goto got_it;
+      }
+      if (baby_match (namelen, name, de))	// 判断重名
+        goto page_unlock;
+      rec_len = BABYFS_DIR_RECORD_SIZE;
+      // 无效 de
+      if (!de->inode_no && !de->name_len) goto got_it;
+      ++de;
+    }
+    unlock_page(page);
+    baby_put_page(page);
   }
+  return -EINVAL;
 
-  // "." 和 ".."
-  if (!dir_emit_dots(dir, ctx)) return 0;
+got_it:
+  // 获取文件内偏移量; page->index >> PAGE_SHIFT + delta
+  pos = page_offset(page) + (char *)de - (char *)page_address(page);
+  // 直接调用 __block_write_begin，保证写数据的时候先和磁盘同步，避免数据覆盖
+  err = baby_prepare_chunk(page, pos, rec_len);
+  // printk(KERN_INFO "add_link---err_baby_prepare_chunk: %d", err);
+  if (err) goto page_unlock;
+  de->name_len = namelen;
+  memcpy(de->name, name, namelen);
+  de->inode_no = cpu_to_le32(inode->i_ino);
+  baby_set_de_type(de, inode);
+  // 提交 change，把 page 写到磁盘
+  err = baby_commit_chunk(page, pos, rec_len);
+  // printk(KERN_INFO "add_link---err_baby_commit_chunk: %d", err);
+  dir->i_mtime = dir->i_ctime = BABYFS_CURRENT_TIME;
+  mark_inode_dirty(dir);
+page_put:
+  baby_put_page(page);
+out:
+  return err;
+page_unlock:
+  unlock_page(page);
+  goto page_put;
+}
 
-  // 初始化 work_extra_arg_fillctx
-  struct work_extra_arg_fillctx fillctx;
-  fillctx.ctx = ctx;
-  fillctx.inode_info = inode_info;
+// 遍历目录项
+static int baby_iterate(struct file *dir, struct dir_context *ctx) {
+  loff_t pos = ctx->pos;  // ctx->pos 表示已经读取了多少字节的数据
+  struct inode *inode = file_inode(dir);  // 获取 inode 数据结构
+  // unsigned int offset = pos & ~PAGE_MASK;     // 清除 pos 的后面 12 位数据
+  unsigned long npages = dir_pages(inode);   // inode 数据的最大页数
+  unsigned long nstart = pos >> PAGE_SHIFT;  // 从第 nstart 页开始查找
+  // 超出最大数据
+  if (pos >= inode->i_size) return 0;
 
-  /* 直接索引遍历 */
-  __le32 *index = inode_info->i_blocks;
-  int i;
-  for (i = 0; i < BABYFS_DIRECT_BLOCK; ++i) {
-    do_fill_ctx(index[i], sb, &fillctx);
-    if (ctx->pos >= inode_info->i_subdir_num + 2) return 0;
+  /* 开始查找目录项 */
+  unsigned long nloop;
+  for (nloop = nstart; nloop < npages; ++nloop) {
+    char *kaddr;            // 保存 page 的起始地址
+    struct dir_record *de;  // 保存目录项
+    struct page *page = baby_get_page(inode, nloop);  // 获取 page 结构体
+    if (IS_ERR(page)) {
+      ctx->pos += PAGE_SIZE;
+      return PTR_ERR(page);
+    }
+    /* 现在开始在 page 内部查找 */
+    kaddr = page_address(page);
+    char *limit = kaddr + baby_last_byte(inode, nloop);
+    de = (struct dir_record *)kaddr;
+    for (; (char *)de < limit; ++de) {
+      // 必须要目录项存在并且 inode 编号大于 0
+      if (de->name_len && de->inode_no) {
+        // TODO d_type 改成指定类型
+        unsigned char d_type = de->file_type;
+        printk(KERN_INFO "de->name: %s, de->inode_no: %d, de->namelen: %d, de->file_type: %d", de->name, de->inode_no, de->name_len, de->file_type);
+        int ret = dir_emit(ctx, de->name, de->name_len,
+                           le32_to_cpu(de->inode_no), d_type);
+        // printk(KERN_INFO "filename: %s, de 的地址: %p, ret: %d", de->name,
+        // (char *)de, ret);
+        if (!ret) {
+          baby_put_page(page);
+          return 0;
+        }
+      }
+      ctx->pos += BABYFS_DIR_RECORD_SIZE;  // 长度增加
+    }
+    baby_put_page(page);  // 释放 page
   }
-
-  // 初始化 walk_struct
-  struct baby_walk_struct walk_struct = {.block = index[BABYFS_PRIMARY_BLOCK],
-                                         .level = 1,
-                                         .sb = sb,
-                                         .work_extra_arg = &fillctx,
-                                         .work = do_fill_ctx,
-                                         .terminate = termi_fillctx};
-
-  /* 一级索引遍历 */
-  if (index[BABYFS_PRIMARY_BLOCK]) {
-    walk_index(&walk_struct);
-    if (ctx->pos >= inode_info->i_subdir_num + 2) return 0;
-  }
-
-  /* 二级、三级索引遍历 */
-  walk_struct.block = index[BABYFS_SECONDRTY_BLOCK];
-  walk_struct.level = 2;
-  if (index[BABYFS_SECONDRTY_BLOCK]) {
-    walk_index(&walk_struct);
-    if (ctx->pos >= inode_info->i_subdir_num + 2) return 0;
-  }
-  walk_struct.block = index[BABYFS_THIRD_BLOCKS];
-  walk_struct.level = 3;
-  if (index[BABYFS_THIRD_BLOCKS]) {
-    walk_index(&walk_struct);
-    if (ctx->pos >= inode_info->i_subdir_num + 2) return 0;
-  }
-
   return 0;
 }
 
-// 目录文件操作函数
+// 实现从 dir 中根据 child 文件名匹配目录项
+struct dir_record *baby_find_entry(struct inode *dir,
+      const struct qstr *child, struct page **res_page) {
+  struct dir_record *de = NULL;
+  unsigned long nstart = 0, nloop, npages = dir_pages(dir);  // 获取 page number
+  struct page *page = NULL;
+  struct baby_inode_info *bbi = BABY_I(dir);
+  char *kaddr, *limit;
+  if(npages == 0)
+    goto out;
+  for(nloop = nstart; nloop <= npages; ++nloop) {
+    page = baby_get_page(dir, nloop);
+    if(IS_ERR(page))
+      goto out;
+    kaddr = page_address(page);
+    limit = kaddr + baby_last_byte(dir, nloop);
+    de = (struct dir_record *)kaddr;
+    for(; (char *)de < limit; ++de){
+      if(!de->name_len){
+        baby_put_page(page);
+        goto out;
+      }
+      if(baby_match(child->len, child->name, de)) {
+        *res_page = page;
+        return de;
+      }
+    }
+  }
+out:
+  return NULL;
+}
+
+unsigned int baby_inode_by_name(struct inode *dir, const struct qstr *child) {
+  unsigned int ino = 0;
+  struct dir_record *de;
+  struct page *page;
+  de = baby_find_entry(dir, child, &page);
+  if(de) {
+    ino = le32_to_cpu(de->inode_no);
+    baby_put_page(page);
+  }
+  return ino;
+}
+
+int baby_make_empty(struct inode *inode, struct inode *parent) {
+  struct page *page = grab_cache_page(inode->i_mapping, 0); // 从 page_cache 中获取 index = 0 的 page，不存在的话就会创建一个
+  struct dir_record *de = NULL;
+  int err;
+  void *kaddr;
+  err = baby_prepare_chunk(page, 0, BABYFS_BLOCK_SIZE); // 保证写数据的时候先和磁盘同步
+  if(err) {
+    printk(KERN_ERR "baby_make_empty: baby_prepare_chunk failed");
+    unlock_page(page);
+    goto fail;
+  }
+  kaddr = kmap_atomic(page); // 关闭内核抢占，这个函数里面会调用 page_address()
+  memset(kaddr, 0, BABYFS_BLOCK_SIZE);
+  de = (struct dir_record *)kaddr;
+  de->name_len = 1;
+  memcpy(de->name, ".", 1);
+  de->inode_no = cpu_to_le32(inode->i_ino);
+  baby_set_de_type(de, inode);
+  ++de;
+
+  de->name_len = 2;
+  de->inode_no = cpu_to_le32(parent->i_ino);
+  memcpy(de->name, "..", 2);
+  baby_set_de_type(de, inode);
+  kunmap_atomic(kaddr);
+  err = baby_commit_chunk(page, 0, BABYFS_BLOCK_SIZE);
+fail:
+  put_page(page);
+  return err;
+}
+
+/**
+ * 删除一个目录项，先找到那个目录项，把inode号和name_len变成0，
+ * 
+ * @param de 待删除目录项
+ * @param page 待删除目录项所在的page
+ * @return int 
+ */
+int baby_delete_entry (struct dir_record * de, struct page * page)
+{
+  struct inode *inode = page->mapping->host;
+  loff_t pos = (char*)de;
+  int err;
+
+  lock_page(page);
+  err = baby_prepare_chunk(page, pos, sizeof(struct dir_record));
+  BUG_ON(err);
+  /*要删除的目录项inode号和name_len变成0*/
+  de->inode_no = 0;
+  de->name_len = 0;
+  err = baby_commit_chunk(page, pos, sizeof(struct dir_record)); // 提交修改
+  inode->i_ctime = inode->i_mtime = current_time(inode); // 更新文件修改时间
+  mark_inode_dirty(inode);
+
+  baby_put_page(page);
+  return err;
+}
+
 const struct file_operations baby_dir_operations = {
     .read = generic_read_dir,
     .iterate_shared = baby_iterate,
 };
-
-// static __u32 walk_index_fillctx(__u32 block, int level, struct super_block
-// *sb, struct dir_context *ctx, struct baby_inode_info *inode_info){
-//   struct buffer_head *bh = sb_bread(sb, block);
-//   __u32 *dblock = (__u32 *)bh->b_data;
-//   while(dblock && (char *)dblock < BABYFS_BLOCK_SIZE){
-//     if(level == 1)
-//       find_dir_record(dblock, sb, ctx, inode_info);
-//     else
-//       walk_index_fillctx(dblock, level - 1, sb, ctx, inode_info);
-//     if(ctx->pos >= inode_info->i_subdir_num + 2){
-//       brelse(bh);
-//       return 0;
-//     }
-//     dblock++;
-//   }
-// }
-
-// static struct dir_record *walk_index_findde(__u32 block, struct super_block
-// *sb, int level){
-//   struct buffer_head *bh = sb_bread(sb, block);
-//   struct dir_record *record = NULL;
-//   __u32 *dblock = (__u32 *)bh->b_data;
-//   while(*dblock && (char *)dblock < BABYFS_BLOCK_SIZE){
-//     if(level == 1)
-//       record = find_free_record(dblock, sb);
-//     else
-//       record = walk_index_findde(dblock, sb, level - 1);
-//     if(record){
-//       brelse(bh);
-//       return record;
-//     }
-//     dblock++;
-//   }
-// }

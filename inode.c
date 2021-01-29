@@ -789,6 +789,34 @@ static int baby_link(struct dentry *old_dentry, struct inode *dir,
   iput(inode);
   return err;
 }
+
+// vfs删除文件时调用unlink，删除目录时调用rmdir，这两个函数都只做了目录项的删除，而没有删除文件内容
+// 从父目录dir中删除目录项dentry
+static int baby_unlink(struct inode * dir, struct dentry *dentry)
+{
+  struct inode * inode = d_inode(dentry);
+  struct dir_record *de;
+  struct page * page;
+  int err;
+
+  de = baby_find_entry(dir, &dentry->d_name, &page); // 查找待删除的目录项
+  if (!de) {
+    err = -ENOENT;
+    goto out;
+  }
+
+  err = baby_delete_entry(de, page); // 从目录项存储的 page 中删除目标目录项
+  if (err)
+    goto out;
+
+  /*修改时间和减少这个被删除目录项 inode 的引用计数*/
+  inode->i_ctime = dir->i_ctime;
+  inode_dec_link_count(inode);
+  err = 0;
+out:
+  return err;
+}
+
 /*
  * 根据父目录和文件名查找 inode，关联目录项；需要从磁盘文件系统根据 ino 读取
  * inode 信息
@@ -815,7 +843,7 @@ struct inode_operations baby_dir_inode_operations = { // 目录文件inode的操
     //.rmdir = baby_rmdir,    // 删除目录
     .symlink = baby_symlink, // 新建软链接
     .link = baby_link, // 新建硬链接
-    //.unlink = baby_unlink, // 删除文件\硬链接
+    .unlink = baby_unlink, // 删除文件\硬链接的目录项
     .getattr = simple_getattr,
 };
 
