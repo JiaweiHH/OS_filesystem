@@ -11,3 +11,4 @@ userspace_test
 userspace_test.c
 mkfs.babyfs
 modules.order
+*.sh

@@ -553,8 +553,7 @@ static int baby_write_begin(struct file *file, struct address_space *mapping,
   return ret;
 }
 
-// 将一个 inode 写回到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
-int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
+int __baby_write_inode(struct inode *inode, int do_sync) {
   struct super_block *sb = inode->i_sb;
   struct baby_inode_info *bbi = BABY_I(inode);
   struct baby_inode *raw_inode;
@@ -584,13 +583,18 @@ int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
   }
 
   mark_buffer_dirty(bh);
-  if (wbc->sync_mode == WB_SYNC_ALL) {  // 支持同步写
+  if (do_sync == WB_SYNC_ALL) {  // 支持同步写
     sync_dirty_buffer(bh);
     if (buffer_req(bh) && !buffer_uptodate(bh)) ret = -EIO;
   }
   brelse(bh);
 
   return ret;
+}
+
+// 将一个 inode 写回到磁盘上，(baby_inode_info, vfs_inode)->raw_inode
+int baby_write_inode(struct inode *inode, struct writeback_control *wbc) {
+  return __baby_write_inode(inode, wbc->sync_mode == WB_SYNC_ALL);
 }
 
 // 创建一个新的 raw inode，并返回其对应的 vfs inode
@@ -932,6 +936,31 @@ out_old:
 	put_page(old_page);
 out:
   return err;
+}
+
+void baby_evict_inode(struct inode *inode) {
+  int want_delete = 0;
+  struct baby_inode_info *inode_info = BABY_I(inode);
+  // 删除 inode 的占用的 pages
+  truncate_inode_pages_final(&inode->i_data);
+  // 坏页检查
+  if(!is_bad_inode(inode) && !inode->i_nlink)
+    want_delete = 1;
+  if(want_delete) {
+    sb_start_intwrite(inode->i_sb);
+    inode_info->i_dtime = get_seconds();
+    mark_inode_dirty(inode);
+    __baby_write_inode(inode, inode_needs_sync(inode));
+    inode->i_size = 0;
+    if(inode->i_blocks)
+      baby_truncate_blocks(inode, 0); // 释放 inode 占用的磁盘块
+  }
+  clear_inode(inode);
+  inode_info->i_next_alloc_block = i_next_alloc_goal = 0;
+  if(want_delete) {
+    baby_free_inode(inode); // 释放 inode
+    sb_end_intwrite(inode->i_sb);
+  }
 }
 
 struct inode_operations baby_dir_inode_operations = {

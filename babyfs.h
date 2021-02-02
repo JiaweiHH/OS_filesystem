@@ -119,6 +119,7 @@ struct baby_inode_info {
   struct inode vfs_inode;
   __u32 i_next_alloc_block; /* 下一次分配文件内逻辑块号 */
   __u32 i_next_alloc_goal;  /* 下一次分配物理块号 */
+  __u32 i_dtime;            /* 删除时间 */
 };
 
 // 从 vfs inode 返回包含他的 baby_inode_info
@@ -154,6 +155,7 @@ extern const struct address_space_operations baby_aops;
 extern int baby_get_block(struct inode *inode, sector_t block,
                           struct buffer_head *bh, int create);
 extern int baby_write_inode(struct inode *inode, struct writeback_control *wbc);
+extern void baby_evict_inode(struct inode *inode);
 
 /* file.c */
 extern const struct file_operations baby_file_operations;

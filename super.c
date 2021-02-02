@@ -151,6 +151,7 @@ struct super_operations babyfs_super_opts = { // 自定义 super_block 操作集
   .destroy_inode= baby_destroy_inode,   // 释放 inode
 	.write_inode	= baby_write_inode,     // 将 inode 写到磁盘上
   .put_super    = baby_put_super,       // 删除超级块实例的方法
+  .evict_inode  = baby_evict_inode,     // 回收 inode 所占用的空间
 };
 
 static struct file_system_type baby_fs_type = { // 文件系统类型
