@@ -36,12 +36,11 @@ static void test_mkfs() {
   // record++;
   // printf("name: %s\n", record->name);
   char *buf = malloc(BABYFS_BLOCK_SIZE);
-  lseek(fd, 2 * BABYFS_BLOCK_SIZE, SEEK_SET);
+  lseek(fd, 1026 * BABYFS_BLOCK_SIZE, SEEK_SET);
   read(fd, buf, BABYFS_BLOCK_SIZE);
   // u_int64_t *data_bitmap = (u_int64_t *)buf;
-  struct baby_inode *inode = (struct baby_inode *)buf;
-  printf("i_blocknum: %d\n", inode->i_blocknum);
-  printf("i_blocks: %d\n", *(inode->i_blocks));
+  u_int8_t *data = (u_int8_t *)buf;
+  printf("block_data: 0x%x\n", *data);
 }
 
 static void printf_message() {

@@ -277,7 +277,7 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
   unsigned long next = 0;
   unsigned long bitmap_delta = 0;
 
-  printk("goal: %d", goal);
+  printk("goal: %ld", goal);
   // 首先在 goal 附近开始向后寻找可用的块
   if (goal > 0) {
     // data_bitmap 起始搜寻块
@@ -315,10 +315,10 @@ got_it:
   if (first) {
     *count = min(*count, next - first);  // 没有达到预期分配的数量
     printk(
-        "baby_new_blocks. ino: %d, NR_DSTORE_BLOCKS: %d, first: %d, next: %d, "
-        "real_first: %d, "
+        "baby_new_blocks. ino: %ld, NR_DSTORE_BLOCKS: %ld, first: %ld, next: %ld, "
+        "real_first: %ld, "
         "count: "
-        "%d, BABYFS_DATA_BIT_MAP_BLOCK_BASE: %d, block_bitmap_bno: %d",
+        "%ld, BABYFS_DATA_BIT_MAP_BLOCK_BASE: %d, block_bitmap_bno: %ld",
         inode->i_ino, NR_DSTORE_BLOCKS, first, next,
         first + bitmap_delta * per_block_num + NR_DSTORE_BLOCKS, *count,
         BABYFS_DATA_BIT_MAP_BLOCK_BASE, block_bitmap_bno);
@@ -356,7 +356,7 @@ static int baby_alloc_blocks(struct inode *inode, unsigned long goal,
       new_blocks[index++] = current_block++;
       count--;
     }
-    printk(KERN_INFO "baby_alloc_blocks, count: %d, target: %d", count, target);
+    printk(KERN_INFO "baby_alloc_blocks, count: %ld, target: %d", count, target);
     /*
      * count >  0 表示间接块已经全部分配了，并且分配了一定数量的直接块
      * count = 0 表示简介块分配完，但是直接块还没有分配一块
@@ -637,7 +637,7 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，
   // 并设置 inode 的 i_state 状态
   if (insert_inode_locked(inode) < 0) {
-    printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %lu",
+    printk(KERN_ERR "baby_new_inode: inode number already in use - inode = %u",
            i_no);
     err = -EIO;
     goto fail;
@@ -796,22 +796,21 @@ static int baby_link(struct dentry *old_dentry, struct inode *dir,
 
 // vfs删除文件时调用unlink，删除目录时调用rmdir，这两个函数都只做了目录项的删除，而没有删除文件内容
 // 从父目录dir中删除目录项dentry
-static int baby_unlink(struct inode * dir, struct dentry *dentry)
-{
-  struct inode * inode = d_inode(dentry);
+static int baby_unlink(struct inode *dir, struct dentry *dentry) {
+  struct inode *inode = d_inode(dentry);
   struct dir_record *de;
-  struct page * page;
+  struct page *page;
   int err;
 
-  de = baby_find_entry(dir, &dentry->d_name, &page); // 查找待删除的目录项
+  de = baby_find_entry(dir, &dentry->d_name, &page);  // 查找待删除的目录项
+  printk(KERN_INFO "de->name: %s", de->name);
   if (!de) {
     err = -ENOENT;
     goto out;
   }
 
-  err = baby_delete_entry(de, page); // 从目录项存储的 page 中删除目标目录项
-  if (err)
-    goto out;
+  err = baby_delete_entry(de, page);  // 从目录项存储的 page 中删除目标目录项
+  if (err) goto out;
 
   /*修改时间和减少这个被删除目录项 inode 的引用计数*/
   inode->i_ctime = dir->i_ctime;
@@ -822,17 +821,17 @@ out:
 }
 
 /*删除目录，dir 是删除的目录的父目录，dentry 是待删除的目录的 dentry*/
-static int baby_rmdir (struct inode * dir, struct dentry *dentry)
-{
-  struct inode * inode = d_inode(dentry); // 待删除文件 inode
+static int baby_rmdir(struct inode *dir, struct dentry *dentry) {
+  struct inode *inode = d_inode(dentry);  // 待删除文件 inode
   int err = -ENOTEMPTY;
 
-  if (baby_empty_dir(inode)) { // 检查待删除的目录是否为空，只有空的目录才能被删除
-    err = baby_unlink(dir, dentry); // 从父目录中删除自身的目录项
+  if (baby_empty_dir(
+          inode)) {  // 检查待删除的目录是否为空，只有空的目录才能被删除
+    err = baby_unlink(dir, dentry);  // 从父目录中删除自身的目录项
     if (!err) { /*把目标文件大小置为0，减少引用计数*/
       inode->i_size = 0;
       inode_dec_link_count(inode);
-      inode_dec_link_count(dir); // 子目录的“..”指向父目录
+      inode_dec_link_count(dir);  // 子目录的“..”指向父目录
     }
   }
   return err;
@@ -896,17 +895,14 @@ static int baby_rename(struct inode *old_dir, struct dentry *old_dentry,
     baby_set_link(new_dir, new_de, new_page, old_inode, 1);
     new_inode->i_ctime = current_time(new_inode);
     // 由于 ".." 存在，因此待覆盖目录中的 "." 指向的不再是 new_inode
-    if(dotdot_de)
-      drop_nlink(new_inode);
+    if (dotdot_de) drop_nlink(new_inode);
     // 待覆盖目录项的 inode_no 不再是 new_inode
     inode_dec_link_count(new_inode);
   } else {  // 目的地文件不存在，只是简单的重命名
     err = baby_add_link(new_dentry, old_inode);
-    if(err)
-      goto out_dir;
+    if (err) goto out_dir;
     // 原文件的 ".." 目录项存在，因此会变成指向目的地的父目录
-    if(dotdot_de)
-      inode_inc_link_count(new_dir);
+    if (dotdot_de) inode_inc_link_count(new_dir);
   }
 
   old_inode->i_ctime = current_time(old_inode);
@@ -915,8 +911,8 @@ static int baby_rename(struct inode *old_dir, struct dentry *old_dentry,
   baby_delete_entry(old_de, old_page);
 
   // 如果是目录文件，需要将 ".." 指向新的父目录
-  if(dotdot_de) {
-    if(old_dir != new_dir)
+  if (dotdot_de) {
+    if (old_dir != new_dir)
       baby_set_link(old_inode, dotdot_de, dir_page, new_dir, 0);
     else {
       kunmap(dir_page);
@@ -927,15 +923,167 @@ static int baby_rename(struct inode *old_dir, struct dentry *old_dentry,
   return 0;
 
 out_dir:
-  if(dotdot_de) {
+  if (dotdot_de) {
     kunmap(dir_page);
     put_page(dir_page);
   }
 out_old:
   kunmap(old_page);
-	put_page(old_page);
+  put_page(old_page);
 out:
   return err;
+}
+
+// 从 block 块开始连续释放 count 块
+void baby_free_blocks(struct inode *inode, unsigned long block, unsigned long count) {
+  struct buffer_head *bitmap_bh = NULL; // 用来读取 bitmap 块
+  struct super_block *sb = inode->i_sb;
+  unsigned long i, bitmap_no = 0;
+  printk("count: %ld", count);
+  for(i = 0; i < count; ++i) {
+    // 计算 blcok 所在的 bitmap 块号
+    unsigned long bitmap_no_temp = (block + i) / BABYFS_BIT_PRE_BLOCK + BABYFS_DATA_BIT_MAP_BLOCK_BASE;
+    printk("bitmap_no_temp: %d\n", bitmap_no_temp);
+    if(bitmap_no != bitmap_no_temp){
+      if(bitmap_bh) {
+        mark_buffer_dirty(bitmap_bh);
+        brelse(bitmap_bh);
+      }
+      bitmap_bh = sb_bread(sb, bitmap_no);
+    }
+    unsigned long clear_block_bit = ((block + i) - NR_DSTORE_BLOCKS) % BABYFS_BIT_PRE_BLOCK;
+    printk("(clear_block_bit: %d\n", clear_block_bit);
+    baby_clear_bit(clear_block_bit, bitmap_bh->b_data); // 清除该 bitmap 中的相对位置的 bit
+  }
+  mark_buffer_dirty(bitmap_bh);
+  brelse(bitmap_bh);
+}
+
+/*
+ * 释放直接块，连续的释放
+ * @p: 索引数组开始的位置
+ * @q: 索引数组结束的位置
+ */
+static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
+  unsigned long block_to_free = 0, count = 0, nr;
+  for (; p < q; ++p) {
+    nr = le32_to_cpu(*p);
+    if (nr) {
+      *p = 0;
+      if (count == 0)
+        goto free_this;
+      else if (block_to_free ==
+               nr - count)  // 连续的块先记录着，然后再一次性 free
+        count++;
+      else {
+        baby_free_blocks(inode, block_to_free, count);
+        mark_inode_dirty(inode);
+      free_this:
+        block_to_free = nr;
+        count = 1;
+      }
+    }
+  }
+  if (count > 0) {
+    baby_free_blocks(inode, block_to_free, count);
+    mark_inode_dirty(inode);
+  }
+}
+
+/*
+ * 释放间接块
+ * @p: 开始释放的地址
+ * @q: 截止释放的地址
+ * @depth: 需要释放的数量
+ */
+static void baby_free_branches(struct inode *inode, __le32 *p, __le32 *q, int depth) {
+  struct buffer_head *bh;
+  unsigned long nr;
+  unsigned long address_num_per_block = BABYFS_BLOCK_SIZE / sizeof(__u32);  // 每个磁盘块中可以表示的 块号的数量
+  if(depth--) {
+    for(; p < q; ++p) {
+      nr = le32_to_cpu(*p); // 带释放的间接块块号
+      if(!nr)
+        continue;
+      *p = 0;
+      bh = sb_bread(inode->i_sb, nr); // 读取该间接块
+      if(!bh) {
+        printk(KERN_ERR "baby_free_branches, read failure, inode = %ld, block = %ld", inode->i_ino, nr);
+        continue;
+      }
+      // 递归释放块内的数据
+      baby_free_branches(inode, (__le32 *)bh->b_data, (__le32 *)bh->b_data + address_num_per_block, depth);
+      bforget(bh);
+      // 到达这里，说明是直接块
+      baby_free_blocks(inode, nr, 1);
+      mark_inode_dirty(inode);
+    }
+  } else {
+    // 此时 depth == 0，说明是直接块，调用释放直接块的函数
+    baby_free_data(inode, p, q);
+  }
+}
+
+static void __baby_truncate_blocks(struct inode *inode, loff_t offset) {
+  int offsets[4];
+  __le32 nr = 0;
+  struct baby_inode_info *inode_info = BABY_I(inode);
+  __le32 *i_blocks = inode_info->i_blocks;
+  // 获取开始截断的块号，这个函数应该还会在别的地方用到，单纯的释放 inode
+  // 的话，iblock 就是 0 不需要计算
+  unsigned long block_bit = 10;
+  long iblock = (offset + BABYFS_BLOCK_SIZE - 1) >> block_bit;
+  // 获取 iblock 的磁盘块信息
+  int n = baby_block_to_path(inode, iblock, offsets, NULL);
+  if (n == 0) return;
+  if (n == 1) {
+    // 释放直接块
+    baby_free_data(inode, i_blocks + offsets[0], i_blocks + BABYFS_DIRECT_BLOCK);
+    goto do_indirects;
+  }
+  // TODO 非 inode 释放块的场景下的额外工作; 此时一开始返回的 n 可能会大于 1
+
+
+// 从 offsets[0] 对应的间接块开始，往下释放更高级的间接块
+do_indirects:
+  switch (offsets[0]) {
+    // 如果存在以及间接块，释放它
+    default:
+      nr = i_blocks[BABYFS_PRIMARY_BLOCK];
+      printk("default: %d\n", nr);
+      if (nr) {
+        i_blocks[BABYFS_PRIMARY_BLOCK] = 0;
+        mark_inode_dirty(inode);
+        baby_free_branches(inode, &nr, &nr + 1, 1);
+      }
+    // 如果存在二级间接块，释放它
+    case BABYFS_PRIMARY_BLOCK:
+      nr = i_blocks[BABYFS_SECONDRTY_BLOCK];
+      printk("BABYFS_PRIMARY_BLOCK: %d\n", nr);
+      if (nr) {
+        i_blocks[BABYFS_SECONDRTY_BLOCK] = 0;
+        mark_inode_dirty(inode);
+        baby_free_branches(inode, &nr, &nr + 1, 2);
+      }
+    case BABYFS_SECONDRTY_BLOCK:
+      nr = i_blocks[BABYFS_THIRD_BLOCKS];
+      printk("BABYFS_THIRD_BLOCKS: %d\n", nr);
+      if (nr) {
+        i_blocks[BABYFS_THIRD_BLOCKS] = 0;
+        mark_inode_dirty(inode);
+        baby_free_branches(inode, &nr, &nr + 1, 3);
+      }
+    case BABYFS_THIRD_BLOCKS:
+      ;
+  }
+}
+
+static void baby_truncate_blocks(struct inode *inode, loff_t offset) {
+  // 只有这些文件可以释放磁盘块
+  if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
+        S_ISLNK(inode->i_mode)))
+    return;
+  __baby_truncate_blocks(inode, offset);
 }
 
 void baby_evict_inode(struct inode *inode) {
@@ -944,36 +1092,34 @@ void baby_evict_inode(struct inode *inode) {
   // 删除 inode 的占用的 pages
   truncate_inode_pages_final(&inode->i_data);
   // 坏页检查
-  if(!is_bad_inode(inode) && !inode->i_nlink)
-    want_delete = 1;
-  if(want_delete) {
+  if (!is_bad_inode(inode) && !inode->i_nlink) want_delete = 1;
+  if (want_delete) {
     sb_start_intwrite(inode->i_sb);
     inode_info->i_dtime = get_seconds();
     mark_inode_dirty(inode);
     __baby_write_inode(inode, inode_needs_sync(inode));
     inode->i_size = 0;
-    if(inode->i_blocks)
-      baby_truncate_blocks(inode, 0); // 释放 inode 占用的磁盘块
+    // if (inode->i_blocks)
+      baby_truncate_blocks(inode, 0);  // 释放 inode 占用的磁盘块
   }
   clear_inode(inode);
-  inode_info->i_next_alloc_block = i_next_alloc_goal = 0;
-  if(want_delete) {
-    baby_free_inode(inode); // 释放 inode
+  inode_info->i_next_alloc_block = inode_info->i_next_alloc_goal = 0;
+  if (want_delete) {
+    // baby_free_inode(inode);  // 释放 inode
     sb_end_intwrite(inode->i_sb);
   }
 }
 
 struct inode_operations baby_dir_inode_operations = {
     // 目录文件inode的操作
-    .lookup = baby_lookup,  //
-    .create = baby_create,  // 新建文件
-    .mkdir = baby_mkdir,    // 新建目录
-    .rmdir = baby_rmdir,    // 删除目录
+    .lookup = baby_lookup,    //
+    .create = baby_create,    // 新建文件
+    .mkdir = baby_mkdir,      // 新建目录
+    .rmdir = baby_rmdir,      // 删除目录
     .symlink = baby_symlink,  // 新建软链接
     .link = baby_link,        // 新建硬链接
-    .unlink = baby_unlink, // 删除文件\硬链接
-    .rename = baby_rename,
-    .getattr = simple_getattr,
+    .unlink = baby_unlink,    // 删除文件\硬链接
+    .rename = baby_rename,   .getattr = simple_getattr,
 };
 
 struct inode_operations baby_file_inode_operations = {

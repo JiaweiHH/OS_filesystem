@@ -204,7 +204,6 @@ static int baby_iterate(struct file *dir, struct dir_context *ctx) {
       if (de->name_len && de->inode_no) {
         // TODO d_type 改成指定类型
         unsigned char d_type = de->file_type;
-        printk(KERN_INFO "de->name: %s, de->inode_no: %d, de->namelen: %d, de->file_type: %d", de->name, de->inode_no, de->name_len, de->file_type);
         int ret = dir_emit(ctx, de->name, de->name_len,
                            le32_to_cpu(de->inode_no), d_type);
         // printk(KERN_INFO "filename: %s, de 的地址: %p, ret: %d", de->name,
@@ -243,6 +242,7 @@ struct dir_record *baby_find_entry(struct inode *dir,
         baby_put_page(page);
         goto out;
       }
+      printk("baby_find_entry. de->name: %s, de->inode_no: %d\n", de->name, de->inode_no);
       if(baby_match(child->len, child->name, de)) {
         *res_page = page;
         return de;

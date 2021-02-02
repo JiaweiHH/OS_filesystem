@@ -6,7 +6,7 @@
 
 #include "babyfs.h"
 
-int NR_DSTORE_BLOCKS;
+unsigned long NR_DSTORE_BLOCKS;
 struct super_operations babyfs_super_opts;
 
 static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
