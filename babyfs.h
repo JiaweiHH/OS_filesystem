@@ -59,7 +59,7 @@ extern unsigned long NR_DSTORE_BLOCKS;  // 保存数据块起始块号
 #define BABYFS_PRIMARY_BLOCK BABYFS_DIRECT_BLOCK
 #define BABYFS_SECONDRTY_BLOCK (BABYFS_PRIMARY_BLOCK + 1)
 #define BABYFS_THIRD_BLOCKS (BABYFS_SECONDRTY_BLOCK + 1)
-#define BABYFS_N_BLOCKS BABYFS_THIRD_BLOCKS
+#define BABYFS_N_BLOCKS (BABYFS_THIRD_BLOCKS + 1)
 #define BABYFS_PER_INDEX_SIZE 4  // 每个索引数据的大小
 #define BABYFS_PER_BLOCK_INDEX_NUM \
   BABYFS_BLOCK_SIZE / BABYFS_PER_INDEX_SIZE  // 每个数据块可以存放的索引数据数量
@@ -91,7 +91,7 @@ struct baby_inode {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   __u8 _padding[(BABYFS_INODE_SIZE -
-                 (2 * 3 + 4 * 6 + 2 + 2))]; /* inode 结构体扩展到 128B */
+                 (2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
 };
 
 /*
