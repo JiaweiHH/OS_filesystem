@@ -159,6 +159,8 @@ got_it:
   if (err) goto page_unlock;
   de->name_len = namelen;
   memcpy(de->name, name, namelen);
+  // 由于babyfs的目录项长度固定，将目录项名称后的字符清零会更有利于调试，不这样做也可以
+  memset((char *)(de->name) + namelen, 0, BABYFS_FILENAME_MAX_LEN - namelen);
   de->inode_no = cpu_to_le32(inode->i_ino);
   baby_set_de_type(de, inode);
   // 提交 change，把 page 写到磁盘
@@ -224,28 +226,28 @@ static int baby_iterate(struct file *dir, struct dir_context *ctx) {
 struct dir_record *baby_find_entry(struct inode *dir,
       const struct qstr *child, struct page **res_page) {
   struct dir_record *de = NULL;
-  unsigned long nstart = 0, nloop, npages = dir_pages(dir);  // 获取 page number
+  unsigned long nloop, npages;
   struct page *page = NULL;
-  struct baby_inode_info *bbi = BABY_I(dir);
   char *kaddr, *limit;
+
+  npages = dir_pages(dir); // inode 数据的最大页数
   if(npages == 0)
     goto out;
-  for(nloop = nstart; nloop <= npages; ++nloop) {
+  /* TODO 可优化项，在bbi中添加i_dir_start_lookup为上一次find entry找到目录项的页，
+	根据局部性原理，下次要找的目录项大概率也在这一页或者相邻页 */
+  for(nloop = 0; nloop < npages; ++nloop) { // 查找所有页
     page = baby_get_page(dir, nloop);
     if(IS_ERR(page))
       goto out;
     kaddr = page_address(page);
     limit = kaddr + baby_last_byte(dir, nloop);
     de = (struct dir_record *)kaddr;
-    for(; (char *)de < limit; ++de){
-      if(!de->name_len){
-        baby_put_page(page);
-        goto out;
-      }
-      printk("baby_find_entry. de->name: %s, de->inode_no: %d\n", de->name, de->inode_no);
-      if(baby_match(child->len, child->name, de)) {
-        *res_page = page;
-        return de;
+    for(; (char *)de < limit; ++de){ // 查找页内的所有目录项
+      if (de->name_len && de->inode_no) { // 检查有效项
+        if (baby_match(child->len, child->name, de)) {
+          *res_page = page;
+          return de;
+        }
       }
     }
   }
