@@ -315,7 +315,8 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
   }
 got_it:
   if (first) {
-    *count = min(*count, next - first);  // 设置实际分配的磁盘块的数量，有可能小于要求分配的数量
+    // next 的含义是在 first 之后的相对位置
+    *count = min(*count, next);  // 设置实际分配的磁盘块的数量，有可能小于要求分配的数量
     printk(
         "baby_new_blocks. ino: %ld, NR_DSTORE_BLOCKS: %ld, first: %ld, next: %ld, "
         "real_first: %ld, "
