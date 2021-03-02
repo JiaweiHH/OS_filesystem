@@ -74,6 +74,32 @@ make umount
  */
 ```
 
+### 安装 F2FS
+
+安装 F2FS 格式化工具
+```shell
+sudo apt-get install -y f2fs-tools
+# 使用
+mkfs.f2fs -l f2fs /dev/sda
+
+# 示例
+dd if=/dev/zero of=device bs=4K count=128000 (创建500M)
+losetup /dev/loop0 device
+mkfs.f2fs -l f2fs /dev/loop0
+mount -t f2fs /dev/loop0 /mnt/f2fs
+```
+
+```makefile
+# 拷贝内核文件
+cp -r linux-4.17.12/fs/f2fs .
+# 修改 Makefile 添加内容
+KDIR:=/lib/modules/$(shell uname -r)/build
+all:
+	make -C $(KDIR) M=$(PWD) modules
+# 安装模块
+make && sudo insmod f2fs.ko
+```
+
 API
 
 [https://www.debugger.wiki/article/html/1558843231417175](https://www.debugger.wiki/article/html/1558843231417175)
