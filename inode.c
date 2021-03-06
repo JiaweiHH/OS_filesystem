@@ -392,7 +392,7 @@ static int baby_alloc_branch(struct inode *inode, int indirect_blks,
    * 因为分配的 block 都是连续的，否则就分配一个数据块
    * baby_alloc_blocks 会返回分配的数据块的数量
    */
-  unsigned long new_blocks[4];
+  unsigned long new_blocks[4] = {0};
   unsigned long current_block;
   int err = 0, i = 0;
   unsigned long num =
@@ -415,13 +415,16 @@ static int baby_alloc_branch(struct inode *inode, int indirect_blks,
     partial[n].p =
         (__le32 *)bh->b_data + offsets[n];  // 下一级索引在 bh 块内偏移
     partial[n].key = cpu_to_le32(new_blocks[n]);  // 设置下一级索引块号
+    *(partial[n].p) = partial[n].key; // 设置间接块中的第一个直接块块号
 
     // partial[indirect_blks] 表示的是一级间接块，因此下面要设置直接块的信息
     if (n == indirect_blks) {
       current_block = new_blocks[n];  // 当前直接块的块号
+      printk("n == indirect_blks~~~~~~~~, current_block: %d, num: %d\n", current_block, num);
       int i = 0;
       for (i = 1; i < num; ++i) {  // 直接块是连续的，填充直接块块号
         *(partial[n].p + i) = cpu_to_le32(++current_block);
+        printk("partial[n].p + i: %d\n", current_block);
       }
     }
     set_buffer_uptodate(bh);
@@ -1123,8 +1126,12 @@ void baby_free_inode (struct inode * inode) {
 void baby_evict_inode(struct inode *inode) {
   int want_delete = 0;
   struct baby_inode_info *inode_info = BABY_I(inode);
+
+  struct address_space *as = &inode->i_data;
+  printk("before truncate, mapping->nrpages = %d\n", as->nrpages);
   // 删除 inode 的占用的 pages
   truncate_inode_pages_final(&inode->i_data);
+  printk("after truncate, mapping->nrpages = %d\n", as->nrpages);
   // iput可能会用在分配new inode失败时，此时inode未分配数据块，不用真的删除
   // 分配失败用make_bad_inode标记坏页，用is_bad_inode判断
   if (!is_bad_inode(inode) && !inode->i_nlink) want_delete = 1;
@@ -1137,6 +1144,8 @@ void baby_evict_inode(struct inode *inode) {
     if (inode->i_blocks)
       baby_truncate_blocks(inode, 0);  // 释放 inode 占用的磁盘块
   }
+  // 要被删除的文件不需要再同步数据到磁盘了，清空待IO队列
+  invalidate_inode_buffers(inode);
   clear_inode(inode);
   inode_info->i_next_alloc_block = inode_info->i_next_alloc_goal = 0;
   if (want_delete) {
