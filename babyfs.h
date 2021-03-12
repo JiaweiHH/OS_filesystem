@@ -166,6 +166,7 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
 }
 
 // 小端序位图操作方法
+// baby_find_next_zero_bit(void *map, unsigned long search_maxnum, unsigned long search_start)
 #define baby_set_bit __set_bit_le      // set 1
 #define baby_clear_bit __clear_bit_le  // set 0
 #define baby_test_bit test_bit_le

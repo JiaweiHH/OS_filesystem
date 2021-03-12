@@ -10,7 +10,8 @@ struct inode_operations baby_dir_inode_operations;
 struct inode_operations baby_file_inode_operations;
 struct inode_operations baby_symlink_inode_operations;
 
-void baby_free_blocks(struct inode *inode, unsigned long block, unsigned long count);
+void baby_free_blocks(struct inode *inode, unsigned long block,
+                      unsigned long count);
 
 // 根据文件类型初始化文件inode的操作集合
 void init_inode_operations(struct inode *inode, umode_t mode) {
@@ -237,8 +238,9 @@ static inline int baby_find_goal(struct inode *inode, sector_t block,
   struct baby_inode_info *inode_info = BABY_I(inode);
   // i_next_alloc_block 表示下一次要分配的逻辑块号，i_next_alloc_goal
   // 表示下一次可以分配的物理块号
-  if (block == inode_info->i_next_alloc_block && inode_info->i_next_alloc_goal)
+  if (block == inode_info->i_next_alloc_block && inode_info->i_next_alloc_goal) {
     return inode_info->i_next_alloc_goal;
+  }
   // 说明没有指定下一次要分配的物理块，此时从 partial 附近就近找一个块号
   return baby_find_near(inode, partial);
 }
@@ -268,7 +270,6 @@ static int baby_blks_to_allocate(Indirect *partial, int indirect_blk,
 
 unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
                               unsigned long *count, int *err) {
-  printk(KERN_INFO "baby_new_blocks------");
   unsigned long ret_block;
   struct super_block *sb = inode->i_sb;
   unsigned long per_block_num = BABYFS_BLOCK_SIZE
@@ -279,21 +280,24 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
   unsigned long next = 0;
   unsigned long bitmap_delta = 0;
 
-  printk("goal: %ld", goal);
+  int is_goal = 0;
+
   // 首先在 goal 附近开始向后寻找可用的块
   if (goal > 0) {
+    is_goal = 1;
     // data_bitmap 起始搜寻块
     block_bitmap_bno = goal / per_block_num + BABYFS_DATA_BIT_MAP_BLOCK_BASE;
-    goal %= NR_DSTORE_BLOCKS;
+    goal -= NR_DSTORE_BLOCKS;
+    goal %= per_block_num;
     // 一直搜索直到存储数据的数据块为止
     while (block_bitmap_bno < NR_DSTORE_BLOCKS) {
       bitmap_bh = sb_bread(sb, block_bitmap_bno);
       // TODO 还可以进一步优化。
-      // 找到第一个可用的，和第一个不可用的，之间的差值就是可用的数据块数量
-      first = baby_find_next_zero_bit(bitmap_bh->b_data, per_block_num - goal,
+      // 找到第一个可用的，和第一个不可用的 bit
+      first = baby_find_next_zero_bit(bitmap_bh->b_data, per_block_num,
                                       goal);
       next = baby_find_next_bit((unsigned long *)bitmap_bh->b_data,
-                                per_block_num - first, first) %
+                                per_block_num, first) %
              (per_block_num + 1);
       if (first) goto got_it;
       block_bitmap_bno++;
@@ -304,9 +308,9 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
     while (block_bitmap_bno < NR_DSTORE_BLOCKS) {
       bitmap_bh = sb_bread(sb, block_bitmap_bno);
       first = baby_find_first_zero_bit(bitmap_bh->b_data, per_block_num);
-      // 在第几块停止（包括没找到），就返回第几块
+      // 返回与 first 的相对位移
       next = baby_find_next_bit((unsigned long *)bitmap_bh->b_data,
-                                per_block_num - first, first) %
+                                per_block_num, first) %
              (per_block_num + 1);
       if (first) goto got_it;
       block_bitmap_bno++;
@@ -316,15 +320,8 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
 got_it:
   if (first) {
     // next 的含义是在 first 之后的相对位置
-    *count = min(*count, next);  // 设置实际分配的磁盘块的数量，有可能小于要求分配的数量
-    printk(
-        "baby_new_blocks. ino: %ld, NR_DSTORE_BLOCKS: %ld, first: %ld, next: %ld, "
-        "real_first: %ld, "
-        "count: "
-        "%ld, BABYFS_DATA_BIT_MAP_BLOCK_BASE: %d, block_bitmap_bno: %ld",
-        inode->i_ino, NR_DSTORE_BLOCKS, first, next,
-        first + bitmap_delta * per_block_num + NR_DSTORE_BLOCKS, *count,
-        BABYFS_DATA_BIT_MAP_BLOCK_BASE, block_bitmap_bno);
+    *count = min(*count,
+                 next + 1);  // 设置实际分配的磁盘块的数量，有可能小于要求分配的数量
     int i;
     for (i = 0; i < *count; ++i) {
       baby_set_bit(first + i, bitmap_bh->b_data);
@@ -332,8 +329,18 @@ got_it:
     mark_buffer_dirty(bitmap_bh);
     brelse(bitmap_bh);
     bitmap_delta = block_bitmap_bno - BABYFS_DATA_BIT_MAP_BLOCK_BASE;
-    first = first + bitmap_delta * per_block_num +
-            NR_DSTORE_BLOCKS;  // 返回选中的磁盘块距离存储设备第一块的距离，即物理块号
+    // printk(
+    //     "baby_new_blocks. ino: %ld, NR_DSTORE_BLOCKS: %ld, first: %ld, next: "
+    //     "%ld, "
+    //     "real_first: %ld, is_goal: %d, "
+    //     "count: "
+    //     "%ld, BABYFS_DATA_BIT_MAP_BLOCK_BASE: %d, block_bitmap_bno: %ld",
+    //     inode->i_ino, NR_DSTORE_BLOCKS, first, next,
+    //     first + bitmap_delta * per_block_num + NR_DSTORE_BLOCKS, is_goal, *count,
+    //     BABYFS_DATA_BIT_MAP_BLOCK_BASE, block_bitmap_bno);
+    first =
+        first + bitmap_delta * per_block_num +
+        NR_DSTORE_BLOCKS;  // 返回选中的磁盘块距离存储设备第一块的距离，即物理块号
     return first;
   }
   return 0;
@@ -359,7 +366,6 @@ static int baby_alloc_blocks(struct inode *inode, unsigned long goal,
       new_blocks[index++] = current_block++;
       count--;
     }
-    printk(KERN_INFO "baby_alloc_blocks, count: %ld, target: %d", count, target);
     /*
      * count >  0 表示间接块已经全部分配了，并且分配了一定数量的直接块
      * count = 0 表示简介块分配完，但是直接块还没有分配一块
@@ -375,7 +381,7 @@ static int baby_alloc_blocks(struct inode *inode, unsigned long goal,
 
 failed_out:
   printk(KERN_ERR "baby_alloc_blocks failed_out");
-  for (i = 0; i < index; ++i) { // 依次释放所有已分配的磁盘块
+  for (i = 0; i < index; ++i) {  // 依次释放所有已分配的磁盘块
     baby_free_blocks(inode, new_blocks[i], 1);
   }
   if (index) mark_inode_dirty(inode);
@@ -415,16 +421,14 @@ static int baby_alloc_branch(struct inode *inode, int indirect_blks,
     partial[n].p =
         (__le32 *)bh->b_data + offsets[n];  // 下一级索引在 bh 块内偏移
     partial[n].key = cpu_to_le32(new_blocks[n]);  // 设置下一级索引块号
-    *(partial[n].p) = partial[n].key; // 设置间接块中的第一个直接块块号
+    *(partial[n].p) = partial[n].key;  // 设置间接块中的第一个直接块块号
 
     // partial[indirect_blks] 表示的是一级间接块，因此下面要设置直接块的信息
     if (n == indirect_blks) {
       current_block = new_blocks[n];  // 当前直接块的块号
-      printk("n == indirect_blks~~~~~~~~, current_block: %d, num: %d\n", current_block, num);
       int i = 0;
       for (i = 1; i < num; ++i) {  // 直接块是连续的，填充直接块块号
         *(partial[n].p + i) = cpu_to_le32(++current_block);
-        printk("partial[n].p + i: %d\n", current_block);
       }
     }
     set_buffer_uptodate(bh);
@@ -440,10 +444,10 @@ failed:
   for (i = 1; i < n; ++i) {
     bforget(partial[i].bh);
   }
-  for (i = 0; i < indirect_blks; ++i) { // 释放索引块
+  for (i = 0; i < indirect_blks; ++i) {  // 释放索引块
     baby_free_blocks(inode, new_blocks[i], 1);
   }
-  baby_free_blocks(inode, new_blocks[i], num); // 释放数据块
+  baby_free_blocks(inode, new_blocks[i], num);  // 释放数据块
   return err;
 }
 
@@ -492,6 +496,7 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
   // 的下一级没有分配数据块
   partial = baby_get_branch(inode, depth, offset, chain, &err);
   if (!partial) {
+    // printk("partial == NULL, logick_block: %d\n", block);
     goto got_it;
   }
 
@@ -513,7 +518,7 @@ got_it:
   map_bh(bh, inode->i_sb, le32_to_cpu(chain[depth - 1].key));
   partial = chain + depth - 1;
 clean_up:
-  printk("baby_get_blocks: alloc block no: %d\n", chain[depth - 1].key);
+  // printk("baby_get_blocks: alloc block no: %d\n", chain[depth - 1].key);
   while (partial > chain) {
     brelse(partial->bh);
     partial--;
@@ -946,12 +951,13 @@ out:
 /**
  * @block 物理块号，磁盘块距离第一个磁盘块的距离
  * 释放连续的磁盘块，[block, block+count)
- */ 
-void baby_free_blocks(struct inode *inode, unsigned long block, unsigned long count) {
-  struct buffer_head *bitmap_bh = NULL; // 用来读取 bitmap 块
+ */
+void baby_free_blocks(struct inode *inode, unsigned long block,
+                      unsigned long count) {
+  struct buffer_head *bitmap_bh = NULL;  // 用来读取 bitmap 块
   struct super_block *sb = inode->i_sb;
   unsigned long i, bitmap_no, nr_del_bit, clear_bit_no;
-  
+
   // 待释放 block 对应 bit 所在位图的物理磁盘块号
   bitmap_no = block / BABYFS_BIT_PRE_BLOCK + BABYFS_DATA_BIT_MAP_BLOCK_BASE;
   // 待释放 block 对应 bit 在其位图磁盘块中的偏移
@@ -959,15 +965,20 @@ void baby_free_blocks(struct inode *inode, unsigned long block, unsigned long co
   clear_bit_no = (block - NR_DSTORE_BLOCKS) % BABYFS_BIT_PRE_BLOCK;
   // 在一个位图中，待清除的bit个数，第一个块的起始位不为0
   nr_del_bit = min(count, BABYFS_BIT_PRE_BLOCK - clear_bit_no);
-  
-  printk("block: %ld, bitmap_no: %ld, clear_bit_no: %ld, nr_del_bit: %d\n",block, bitmap_no, clear_bit_no, nr_del_bit);
 
-  while (count > 0) { // 操作bitmap_no指示的位图
+  printk("block: %ld, bitmap_no: %ld, clear_bit_no: %ld, nr_del_bit: %d\n",
+         block, bitmap_no, clear_bit_no, nr_del_bit);
+
+  while (count > 0) {  // 操作bitmap_no指示的位图
     bitmap_bh = sb_bread(sb, bitmap_no);
-    int i_no = baby_find_first_zero_bit(bitmap_bh->b_data, BABYFS_BIT_PRE_BLOCK);
+    int i_no =
+        baby_find_first_zero_bit(bitmap_bh->b_data, BABYFS_BIT_PRE_BLOCK);
     printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
-    for (i = 0; i < nr_del_bit; i++) { // 清空bitmap_no位图块内指定的bit，[clear_bit_no, clear_bit_no+nr)
-      baby_clear_bit(clear_bit_no + i, bitmap_bh->b_data); // 清除该 bitmap 中的相对位置的 bit
+    for (i = 0; i < nr_del_bit;
+         i++) {  // 清空bitmap_no位图块内指定的bit，[clear_bit_no,
+                 // clear_bit_no+nr)
+      baby_clear_bit(clear_bit_no + i,
+                     bitmap_bh->b_data);  // 清除该 bitmap 中的相对位置的 bit
     }
     i_no = baby_find_first_zero_bit(bitmap_bh->b_data, BABYFS_BIT_PRE_BLOCK);
     printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
@@ -975,10 +986,11 @@ void baby_free_blocks(struct inode *inode, unsigned long block, unsigned long co
     mark_buffer_dirty(bitmap_bh);
     brelse(bitmap_bh);
 
-    count -= nr_del_bit; // 还剩多少bit要清除
-    clear_bit_no = 0; // 跨位图的情况，除第一个位图外都从第一个bit开始清除
-    bitmap_no++; // 操作下一个位图
-    nr_del_bit = min(count, BABYFS_BIT_PRE_BLOCK); // 下一个位图中，要清除的bit个数
+    count -= nr_del_bit;  // 还剩多少bit要清除
+    clear_bit_no = 0;  // 跨位图的情况，除第一个位图外都从第一个bit开始清除
+    bitmap_no++;  // 操作下一个位图
+    nr_del_bit =
+        min(count, BABYFS_BIT_PRE_BLOCK);  // 下一个位图中，要清除的bit个数
   }
 }
 
@@ -1019,24 +1031,31 @@ static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
  * @q: 截止释放的地址
  * @depth: 需要释放的数量
  */
-static void baby_free_branches(struct inode *inode, __le32 *p, __le32 *q, int depth) {
+static void baby_free_branches(struct inode *inode, __le32 *p, __le32 *q,
+                               int depth) {
   struct buffer_head *bh;
   unsigned long nr;
-  unsigned long address_num_per_block = BABYFS_BLOCK_SIZE / sizeof(__u32);  // 每个磁盘块中可以表示的 块号的数量
-  if(depth--) {
-    for(; p < q; ++p) {
-      nr = le32_to_cpu(*p); // 下一级索引块的物理块号
-      if(!nr) // 为 0 说明当前层级索引数组中的该索引项未被使用，遍历下一个
+  unsigned long address_num_per_block =
+      BABYFS_BLOCK_SIZE / sizeof(__u32);  // 每个磁盘块中可以表示的 块号的数量
+  if (depth--) {
+    for (; p < q; ++p) {
+      nr = le32_to_cpu(*p);  // 下一级索引块的物理块号
+      if (!nr)  // 为 0 说明当前层级索引数组中的该索引项未被使用，遍历下一个
         continue;
       *p = 0;
-      bh = sb_bread(inode->i_sb, nr); // 读取下一级索引块
-      if(!bh) {
-        printk(KERN_ERR "baby_free_branches, read failure, inode = %ld, block = %ld\n", inode->i_ino, nr);
+      bh = sb_bread(inode->i_sb, nr);  // 读取下一级索引块
+      if (!bh) {
+        printk(KERN_ERR
+               "baby_free_branches, read failure, inode = %ld, block = %ld\n",
+               inode->i_ino, nr);
         continue;
       }
-      baby_free_branches(inode, (__le32 *)bh->b_data, (__le32 *)bh->b_data + address_num_per_block, depth); // 递归释放下一级索引块中的所有索引项
-      bforget(bh); // 抛弃bh的所有待同步信息，并释放bh，因为释放数据不再需要关心数据同步
-      baby_free_blocks(inode, nr, 1); // 释放该索引项指示的下一级索引磁盘块
+      baby_free_branches(inode, (__le32 *)bh->b_data,
+                         (__le32 *)bh->b_data + address_num_per_block,
+                         depth);  // 递归释放下一级索引块中的所有索引项
+      bforget(
+          bh);  // 抛弃bh的所有待同步信息，并释放bh，因为释放数据不再需要关心数据同步
+      baby_free_blocks(inode, nr, 1);  // 释放该索引项指示的下一级索引磁盘块
       mark_inode_dirty(inode);
     }
   } else {
@@ -1059,24 +1078,24 @@ static void __baby_truncate_blocks(struct inode *inode, loff_t offset) {
   if (n == 0) return;
   if (n == 1) {
     // 释放直接块
-    baby_free_data(inode, i_blocks + offsets[0], i_blocks + BABYFS_DIRECT_BLOCK);
+    baby_free_data(inode, i_blocks + offsets[0],
+                   i_blocks + BABYFS_DIRECT_BLOCK);
     goto do_indirects;
   }
   // TODO 非 inode 释放块的场景下的额外工作; 此时一开始返回的 n 可能会大于 1
 
-
 // 从 offsets[0] 对应的间接块开始，往下释放更高级的间接块
 do_indirects:
   switch (offsets[0]) {
-    default: // 如果offsets[0]是直接块，则释放所有间接索引
+    default:  // 如果offsets[0]是直接块，则释放所有间接索引
       nr = i_blocks[BABYFS_PRIMARY_BLOCK];
       printk("BABYFS_PRIMARY_BLOCK: %d\n", nr);
       if (nr) {
-        i_blocks[BABYFS_PRIMARY_BLOCK] = 0; // 先重置i_blocks对应位
+        i_blocks[BABYFS_PRIMARY_BLOCK] = 0;  // 先重置i_blocks对应位
         mark_inode_dirty(inode);
-        baby_free_branches(inode, &nr, &nr + 1, 1); // 释放索引
+        baby_free_branches(inode, &nr, &nr + 1, 1);  // 释放索引
       }
-    case BABYFS_PRIMARY_BLOCK: // 如果offsets[0]是一级索引，则释放二级和三级索引
+    case BABYFS_PRIMARY_BLOCK:  // 如果offsets[0]是一级索引，则释放二级和三级索引
       nr = i_blocks[BABYFS_SECONDRTY_BLOCK];
       printk("BABYFS_SECONDRTY_BLOCK: %d\n", nr);
       if (nr) {
@@ -1084,7 +1103,7 @@ do_indirects:
         mark_inode_dirty(inode);
         baby_free_branches(inode, &nr, &nr + 1, 2);
       }
-    case BABYFS_SECONDRTY_BLOCK: // 如果offsets[0]是二级索引，则释放三级索引
+    case BABYFS_SECONDRTY_BLOCK:  // 如果offsets[0]是二级索引，则释放三级索引
       nr = i_blocks[BABYFS_THIRD_BLOCKS];
       printk("BABYFS_THIRD_BLOCKS: %d\n", nr);
       if (nr) {
@@ -1092,8 +1111,7 @@ do_indirects:
         mark_inode_dirty(inode);
         baby_free_branches(inode, &nr, &nr + 1, 3);
       }
-    case BABYFS_THIRD_BLOCKS:
-      ;
+    case BABYFS_THIRD_BLOCKS:;
   }
 }
 
@@ -1105,12 +1123,12 @@ static void baby_truncate_blocks(struct inode *inode, loff_t offset) {
   __baby_truncate_blocks(inode, offset);
 }
 
-/* 
+/*
  * 删除索引节点，设置inode bitmap
  * 此时索引节点对象已经从散列表中删除，指向这个索引节点的最后一个硬链接
  * 已经从适当的目录中删除，文件的长度截为0，已回收它的所有数据块
  */
-void baby_free_inode (struct inode * inode) {
+void baby_free_inode(struct inode *inode) {
   struct buffer_head *bitmap_bh;
 
   // TODO 当前 inode 分配位图只占了一个磁盘块，要支持多块的话这里要改成循环
@@ -1121,8 +1139,9 @@ void baby_free_inode (struct inode * inode) {
 }
 
 /**
- * 调用 iput() 时，如果 i_nlink 为零，调用该函数执行 inode 相关磁盘块和 page 的释放
- */ 
+ * 调用 iput() 时，如果 i_nlink 为零，调用该函数执行 inode 相关磁盘块和 page
+ * 的释放
+ */
 void baby_evict_inode(struct inode *inode) {
   int want_delete = 0;
   struct baby_inode_info *inode_info = BABY_I(inode);
