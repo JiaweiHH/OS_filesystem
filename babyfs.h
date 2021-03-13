@@ -70,7 +70,7 @@ struct baby_super_block {
   __le32 nr_blocks;        /* blocks 总数 */
   __le32 nr_inodes;        /* inode 总数 */
   __le32 nr_istore_blocks; /* inode 表起始块号 */
-  __le16 nr_dstore_blocks; /* 数据块起始块号 */
+  __le32 nr_dstore_blocks; /* 数据块起始块号 */
   __le32 nr_ifree_blocks;  /* inode 位图起始块号 */
   __le32 nr_bfree_blocks;  /* data block 位图起始块号 */
   __le32 nr_free_inodes;   /* 剩余空闲 inode 数量 */
@@ -110,6 +110,9 @@ struct dir_record {
 struct baby_sb_info {
   struct baby_super_block *s_babysb;
   struct buffer_head *s_sbh;
+  __le32 nr_free_blocks;
+  __le32 nr_free_inodes;
+  __le32 nr_blocks;
 };
 
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
@@ -156,6 +159,8 @@ extern int baby_get_block(struct inode *inode, sector_t block,
                           struct buffer_head *bh, int create);
 extern int baby_write_inode(struct inode *inode, struct writeback_control *wbc);
 extern void baby_evict_inode(struct inode *inode);
+extern unsigned long baby_count_free_inodes(struct super_block *sb);
+extern unsigned long baby_count_free_blocks(struct super_block *sb);
 
 /* file.c */
 extern const struct file_operations baby_file_operations;

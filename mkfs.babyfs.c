@@ -3,13 +3,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <math.h>
+
 
 #include "babyfs.h"
-// #include <unistd.h>
 
 static int fd;
 static int nr_dstore_blocks;  // 保存数据块起始块号
 // static int count = 0;
+
+/*
+ * 在做一次判断，如果 nr_blocks/8192 < nr_dstore_blocks - nr_bfree_blocks 说明 bitmap 有一块被浪费了
+ * 这样就让数据块起始块向前移动一块，bitmap 减少一块；浪费一块数据块
+ */
+void optimize_bitmap_datablock(u_int32_t *nr_bfree_blocks, u_int32_t *nr_dstore_blocks, u_int32_t *nr_blocks) {
+  if(*nr_dstore_blocks - *nr_bfree_blocks > ceil(*nr_blocks / (BABYFS_BLOCK_SIZE << 3))) {
+    (*nr_dstore_blocks)--;
+    (*nr_blocks)++;
+  }
+  return;
+}
 
 static void write_superblock(u_int64_t file_size) {
   u_int32_t total_blocks = file_size / BABYFS_BLOCK_SIZE;
@@ -33,9 +47,11 @@ static void write_superblock(u_int64_t file_size) {
           (BABYFS_BLOCK_SIZE << 3) +
       BABYFS_DATA_BIT_MAP_BLOCK_BASE;  // 数据块起始块号。简单起见，但是这样计算有一点误差
   nr_dstore_blocks = super_block->nr_dstore_blocks;
-  // printf("nr_dstore_blocks: %d\n", nr_dstore_blocks);  //输出看一下
+  // printf("total_blocks: %d, BABYFS_DATA_BIT_MAP_BLOCK_BASE: %d, nr_dstore_blocks: %d\n", total_blocks, BABYFS_DATA_BIT_MAP_BLOCK_BASE, nr_dstore_blocks);  //输出看一下
   super_block->nr_blocks =
       total_blocks - super_block->nr_dstore_blocks;       // 数据块总块数
+  // 做一次优化，连续 bitmap 和 data block，简化分配逻辑
+  optimize_bitmap_datablock(&super_block->nr_bfree_blocks, &super_block->nr_dstore_blocks, &super_block->nr_blocks);
   super_block->nr_free_inodes = BABYFS_INODE_NUM_COUNTS;  // inode 剩余空闲数量
   super_block->nr_free_blocks =
       super_block->nr_blocks;  // data block 剩余空闲数量
@@ -212,11 +228,15 @@ int main(int argc, char **argv) {
     perror("打开文件出错\n");
     return EXIT_FAILURE;
   }
+  // 获取文件大小
+  off_t off = lseek(fd, 0, SEEK_END);
+  lseek(fd, 0, SEEK_SET);
+  u_int64_t file_size = off;
 
   // 获取文件大小
-  struct stat statbuf;
-  stat(argv[1], &statbuf);
-  u_int64_t file_size = statbuf.st_size;
+  // struct stat statbuf;
+  // stat(argv[1], &statbuf);
+  // u_int64_t file_size = statbuf.st_size;
 
   // 按顺序写各个分区部分
   write_superblock(file_size);  // 超级块部分

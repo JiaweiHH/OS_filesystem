@@ -40,6 +40,9 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   sb->s_op = &babyfs_super_opts; // 操作集合
   baby_sb_info->s_babysb = baby_sb;
   baby_sb_info->s_sbh = bh;
+  baby_sb_info->nr_blocks = baby_sb->nr_blocks;
+  baby_sb_info->nr_free_blocks = baby_sb->nr_free_blocks;
+  baby_sb_info->nr_free_inodes = baby_sb->nr_free_inodes;
   sb->s_fs_info = baby_sb_info; // superblock 的私有域存放额外信息，包括磁盘上的结构体
 
   // 获取磁盘存储的 inode 结构体
