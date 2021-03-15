@@ -4,7 +4,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <math.h>
 
 
 #include "babyfs.h"
@@ -18,9 +17,8 @@ static int nr_dstore_blocks;  // 保存数据块起始块号
  * 这样就让数据块起始块向前移动一块，bitmap 减少一块；浪费一块数据块
  */
 void optimize_bitmap_datablock(u_int32_t *nr_bfree_blocks, u_int32_t *nr_dstore_blocks, u_int32_t *nr_blocks) {
-  if(*nr_dstore_blocks - *nr_bfree_blocks > ceil(*nr_blocks / (BABYFS_BLOCK_SIZE << 3))) {
+  if(*nr_dstore_blocks - *nr_bfree_blocks > ((*nr_blocks + BABYFS_BLOCK_SIZE << 3 - 1) / (BABYFS_BLOCK_SIZE << 3))) {
     (*nr_dstore_blocks)--;
-    (*nr_blocks)++;
   }
   return;
 }

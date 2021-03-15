@@ -19,3 +19,11 @@ mount:
 	mkdir test && sudo mount -t babyfs -o loop ./test.img ./test
 umount:
 	sudo umount ./test && rmdir test
+ssd:
+	sudo mkdir /home/jbmaster/Desktop/ssd-ext2 && sudo mount -t ext2 /dev/sdb2 /home/jbmaster/Desktop/ssd-ext2 \
+	&& sudo mkdir /home/jbmaster/Desktop/ssd-ext4 && sudo mount -t ext4 /dev/sdb3 /home/jbmaster/Desktop/ssd-ext4 \
+	&& sudo mkdir /home/jbmaster/Desktop/ssd-f2fs && sudo mount -t f2fs /dev/sdb4 /home/jbmaster/Desktop/ssd-f2fs
+ssdumt:
+	sudo umount /mnt/ssd-ext2 && sudo rmdir /mnt/ssd-ext2 \
+	&& sudo umount /mnt/ssd-ext4 && sudo rmdir /mnt/ssd-ext4 \
+	&& sudo umount /mnt/ssd-f2fs && sudo rmdir /mnt/ssd-f2fs
