@@ -641,6 +641,7 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   inode_init_owner(inode, dir, mode);
   inode->i_ino = i_no;
   inode->i_blocks = 0;
+  inode->i_size = 0;
   inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
   bbi->i_subdir_num = 0;
   // bbi->i_blocks[0] = i_no + NR_DSTORE_BLOCKS; // 新 inode 的第一个数据块号
@@ -1078,6 +1079,7 @@ static void __baby_truncate_blocks(struct inode *inode, loff_t offset) {
   // 的话，iblock 就是 0 不需要计算
   unsigned long block_bit = 10;
   long iblock = (offset + BABYFS_BLOCK_SIZE - 1) >> block_bit;
+  // printk("iblock: %ld\n", iblock); 
   // 获取 iblock 的磁盘块信息
   int n = baby_block_to_path(inode, iblock, offsets, NULL);
   if (n == 0) return;
@@ -1152,10 +1154,8 @@ void baby_evict_inode(struct inode *inode) {
   struct baby_inode_info *inode_info = BABY_I(inode);
   struct baby_sb_info *sb_info = BABY_SB(inode->i_sb);
   struct address_space *as = &inode->i_data;
-  printk("before truncate, mapping->nrpages = %d\n", as->nrpages);
   // 删除 inode 的占用的 pages
   truncate_inode_pages_final(&inode->i_data);
-  printk("after truncate, mapping->nrpages = %d\n", as->nrpages);
   // iput可能会用在分配new inode失败时，此时inode未分配数据块，不用真的删除
   // 分配失败用make_bad_inode标记坏页，用is_bad_inode判断
   if (!is_bad_inode(inode) && !inode->i_nlink) want_delete = 1;
@@ -1165,7 +1165,7 @@ void baby_evict_inode(struct inode *inode) {
     mark_inode_dirty(inode);
     __baby_write_inode(inode, inode_needs_sync(inode));
     inode->i_size = 0;
-    if (inode->i_blocks)
+    // if (inode->i_blocks)
       baby_truncate_blocks(inode, 0);  // 释放 inode 占用的磁盘块
   }
   // 要被删除的文件不需要再同步数据到磁盘了，清空待IO队列
