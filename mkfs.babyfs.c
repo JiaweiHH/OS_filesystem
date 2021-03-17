@@ -53,7 +53,7 @@ static void write_superblock(u_int64_t file_size) {
   super_block->nr_free_inodes = BABYFS_INODE_NUM_COUNTS;  // inode 剩余空闲数量
   super_block->nr_free_blocks =
       super_block->nr_blocks;  // data block 剩余空闲数量
-
+  printf("bitmap_start = %ld, datablock_start = %ld\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE, super_block->nr_dstore_blocks);
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   if (ret != BABYFS_BLOCK_SIZE) {
     perror("超级块写入出错!\n");

@@ -279,7 +279,6 @@ static int baby_blks_to_allocate(Indirect *partial, int indirect_blk,
  */ 
 unsigned long baby_new_blocks(struct inode *inode, unsigned long *goal,
                               unsigned long *count, int *err) {
-  // printk("------new_blocks-------\n");
   struct super_block *sb = inode->i_sb;
   // 最后一个bitmap中包含的有效bit数量
   unsigned long last_bitmap_bits = BABY_SB(sb)->last_bitmap_bits;
@@ -295,7 +294,7 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long *goal,
   start = real_goal % BABYFS_BIT_PRE_BLOCK; // 在bitmap中从哪一位开始查找空位，第一次由goal确定
   while (1) { // 向后遍历 bitmap block
     // 最后一块bitmap的有效位数特殊
-    bitmap_bits = bitmap_bno == NR_DSTORE_BLOCKS - 1 ? last_bitmap_bits : BABYFS_BIT_PRE_BLOCK;
+    bitmap_bits = (bitmap_bno + BABYFS_DATA_BIT_MAP_BLOCK_BASE) == NR_DSTORE_BLOCKS - 1 ? last_bitmap_bits : BABYFS_BIT_PRE_BLOCK;
     // 读取目标bitmap block
     bitmap_bh = sb_bread(sb, bitmap_bno + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
 
@@ -499,7 +498,7 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
   if (err) goto clean_up;
   // 收尾工作，此时的 count 表示直接块的数量
   baby_splice_branch(inode, block, partial, indirect_blk, count);
-  sb_info->nr_free_blocks--;
+  sb_info->nr_free_blocks -= count + indirect_blk;
 
 got_it:
   map_bh(bh, inode->i_sb, le32_to_cpu(chain[depth - 1].key));
@@ -965,7 +964,7 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
     bitmap_bh = sb_bread(sb, bitmap_no);
     int i_no =
         baby_find_first_zero_bit(bitmap_bh->b_data, BABYFS_BIT_PRE_BLOCK);
-    printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
+    // printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
     for (i = 0; i < nr_del_bit;
          i++) {  // 清空bitmap_no位图块内指定的bit，[clear_bit_no,
                  // clear_bit_no+nr)
@@ -1006,7 +1005,7 @@ static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
       else {
         baby_free_blocks(inode, block_to_free, count);
         mark_inode_dirty(inode);
-        sb_info->nr_free_blocks -= count;
+        sb_info->nr_free_blocks += count;
       free_this:
         block_to_free = nr;
         count = 1;
@@ -1015,7 +1014,7 @@ static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
   }
   if (count > 0) {
     baby_free_blocks(inode, block_to_free, count);
-    sb_info->nr_free_blocks -= count;
+    sb_info->nr_free_blocks += count;
     mark_inode_dirty(inode);
   }
 }
@@ -1052,7 +1051,7 @@ static void baby_free_branches(struct inode *inode, __le32 *p, __le32 *q,
       // 抛弃bh的所有待同步信息，并释放bh，因为释放数据不再需要关心数据同步
       bforget(bh);
       baby_free_blocks(inode, nr, 1);  // 释放该索引项指示的下一级索引磁盘块
-      sb_info->nr_free_blocks -= 1;
+      sb_info->nr_free_blocks += 1;
       mark_inode_dirty(inode);
     }
   } else {
@@ -1165,7 +1164,7 @@ void baby_evict_inode(struct inode *inode) {
   inode_info->i_next_alloc_block = inode_info->i_next_alloc_goal = 0;
   if (want_delete) {
     baby_free_inode(inode);  // 释放 inode
-    sb_info->nr_free_inodes--;
+    sb_info->nr_free_inodes++;
     sb_end_intwrite(inode->i_sb);
   }
 }

@@ -75,6 +75,7 @@ struct baby_super_block {
   __le32 nr_bfree_blocks;  /* data block 位图起始块号 */
   __le32 nr_free_inodes;   /* 剩余空闲 inode 数量 */
   __le32 nr_free_blocks;   /* 剩余空闲 data block 数量 */
+  __le32 last_bitmap_bits; /* 最后一块block bitmap含有的有效bit位数 */
 };
 
 // 磁盘索引节点
