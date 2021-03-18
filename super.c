@@ -73,6 +73,7 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   // 初始化超级块
   sb->s_magic = baby_sb->magic; // 魔幻数
   sb->s_op = &babyfs_super_opts; // 操作集合
+  sb->s_maxbytes = MAX_LFS_FILESIZE;
   baby_sb_info->s_babysb = baby_sb;
   baby_sb_info->s_sbh = bh;
   baby_sb_info->nr_blocks = baby_sb->nr_blocks;
@@ -185,6 +186,25 @@ static void baby_put_super(struct super_block *sb) {
   kfree(baby_sb_info);
 }
 
+void baby_sync_super(struct baby_sb_info *sb_info, struct baby_super_block *raw_sb, int wait) {
+  raw_sb->nr_free_blocks = sb_info->nr_free_blocks;
+  raw_sb->nr_free_inodes = sb_info->nr_free_inodes;
+  raw_sb->last_bitmap_bits = sb_info->last_bitmap_bits;
+  mark_buffer_dirty(sb_info->s_sbh);
+  if(wait) {
+    sync_dirty_buffer(sb_info->s_sbh);
+  }
+}
+
+// 同步 super_block 磁盘数据
+static int baby_sync_fs(struct super_block *sb, int wait) {
+  struct baby_sb_info* sb_info = BABY_SB(sb);
+  struct baby_super_block *raw_sb = sb_info->s_babysb;
+
+  baby_sync_super(sb_info, raw_sb, wait);
+  return 0;
+}
+
 struct super_operations babyfs_super_opts = { // 自定义 super_block 操作集合
   .statfs       = simple_statfs,        // 给出文件系统的统计信息，例如使用和未使用的数据块的数目，或者文件名的最大长度
   .alloc_inode	= baby_alloc_inode,     // 申请 inode
@@ -192,6 +212,7 @@ struct super_operations babyfs_super_opts = { // 自定义 super_block 操作集
   .write_inode	= baby_write_inode,     // 将 inode 写到磁盘上
   .put_super    = baby_put_super,       // 删除超级块实例的方法
   .evict_inode  = baby_evict_inode,     // 回收 inode 所占用的空间
+  .sync_fs      = baby_sync_fs,         // 同步 super_block 到磁盘
 };
 
 static struct file_system_type baby_fs_type = { // 文件系统类型

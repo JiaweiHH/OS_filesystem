@@ -14,7 +14,7 @@ install:
 uninstall:
 	sudo rmmod babyfs
 mkimg:
-	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1M count=700 && ./mkfs.babyfs ./test.img
+	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1M count=2048 && ./mkfs.babyfs ./test.img
 mount:
 	mkdir test && sudo mount -t babyfs -o loop ./test.img ./test
 umount:
@@ -27,3 +27,7 @@ ssdumt:
 	sudo umount /mnt/ssd-ext2 && sudo rmdir /mnt/ssd-ext2 \
 	&& sudo umount /mnt/ssd-ext4 && sudo rmdir /mnt/ssd-ext4 \
 	&& sudo umount /mnt/ssd-f2fs && sudo rmdir /mnt/ssd-f2fs
+
+
+# datablock_total - bitmap_num	<= bitmap_num * (blocksize << 3) 
+# (bitmap_num - 1) * (blocksize << 3) <= datablock_total - bitmap_num
