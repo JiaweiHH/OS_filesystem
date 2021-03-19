@@ -92,7 +92,7 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   i_uid_write(vfs_inode, i_uid);
   i_gid_write(vfs_inode, i_gid);
   set_nlink(vfs_inode, le16_to_cpu(raw_inode->i_nlink));
-  vfs_inode->i_size = le32_to_cpu(raw_inode->i_size);
+  vfs_inode->i_size = le64_to_cpu(raw_inode->i_size);
   vfs_inode->i_atime.tv_sec = (signed)le32_to_cpu(raw_inode->i_atime);
   vfs_inode->i_ctime.tv_sec = (signed)le32_to_cpu(raw_inode->i_ctime);
   vfs_inode->i_mtime.tv_sec = (signed)le32_to_cpu(raw_inode->i_mtime);
@@ -571,7 +571,7 @@ int __baby_write_inode(struct inode *inode, int do_sync) {
   raw_inode->i_mode = cpu_to_le16(inode->i_mode);
   raw_inode->i_uid = cpu_to_le16(i_uid_read(inode));
   raw_inode->i_gid = cpu_to_le16(i_gid_read(inode));
-  raw_inode->i_size = cpu_to_le32(inode->i_size);
+  raw_inode->i_size = cpu_to_le64(inode->i_size);
   raw_inode->i_atime = cpu_to_le32(inode->i_atime.tv_sec);
   raw_inode->i_ctime = cpu_to_le32(inode->i_ctime.tv_sec);
   raw_inode->i_mtime = cpu_to_le32(inode->i_mtime.tv_sec);

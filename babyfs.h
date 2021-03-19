@@ -83,7 +83,7 @@ struct baby_inode {
   __le16 i_mode;                    /* 文件类型和访问权限 */
   __le16 i_uid;                     /* inode 所属用户编号 */
   __le16 i_gid;                     /* inode 所属用户组编号 */
-  __le32 i_size;                    /* inode 对应文件大小 */
+  __le64 i_size;                    /* inode 对应文件大小 */
   __le32 i_ctime;                   /* i_ctime */
   __le32 i_atime;                   /* i_atime */
   __le32 i_mtime;                   /* i_mtime */
@@ -92,7 +92,7 @@ struct baby_inode {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   __u8 _padding[(BABYFS_INODE_SIZE -
-                 (2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
+                 (4 + 2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
 };
 
 /*
