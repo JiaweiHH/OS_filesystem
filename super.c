@@ -9,6 +9,41 @@
 unsigned long NR_DSTORE_BLOCKS;
 struct super_operations babyfs_super_opts;
 
+/**
+ * 计算文件系统支持的最大文件大小，最大文件大小受两方面的限制：
+ * 1. 文件多级索引全部用完，可以达到的文件大小
+ * 2. 磁盘块全部分配一个文件，可以达到的文件大小
+ */ 
+static long long baby_max_size(struct super_block *sb) {
+  long long res = BABYFS_DIRECT_BLOCK;
+  int bits = sb->s_blocksize_bits; // 块大小是2的多少次幂
+  int meta_blocks; // 单个文件可能使用到的最大索引块数量
+  long long upper_limit = BABY_SB(sb)->s_babysb->nr_blocks; // 文件最多可使用的数据块数量
+ 
+  /* indirect blocks */
+  meta_blocks = 1;
+  /* double indirect blocks */
+  // 一个索引项占4B=2^2，1<<(bit-2) 代表一个索引块的索引项数目
+  meta_blocks += 1 + (1LL << (bits-2));
+  /* tripple indirect blocks */
+  meta_blocks += 1 + (1LL << (bits-2)) + (1LL << (2*(bits-2)));
+
+  upper_limit -= meta_blocks; // 去掉索引块占用的数量
+  upper_limit <<= bits;
+
+  res += 1LL << (bits-2);
+  res += 1LL << (2*(bits-2));
+  res += 1LL << (3*(bits-2));
+  res <<= bits; // 使用全部的索引，文件可达到的最大大小
+  if (res > upper_limit)
+    res = upper_limit;
+
+  if (res > MAX_LFS_FILESIZE)
+    res = MAX_LFS_FILESIZE;
+
+  return res;
+}
+
 static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   struct buffer_head *bh;
   struct baby_super_block *baby_sb;
@@ -46,13 +81,14 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   baby_sb_info->nr_free_inodes = baby_sb->nr_free_inodes;
   baby_sb_info->last_bitmap_bits = baby_sb->nr_blocks % BABYFS_BIT_PRE_BLOCK;
   sb->s_fs_info = baby_sb_info; // superblock 的私有域存放额外信息，包括磁盘上的结构体
+  sb->s_maxbytes = baby_max_size(sb); // 设置最大文件大小，在文件写入时起限制作用
 
   // 获取磁盘存储的 inode 结构体
   root_vfs_inode = baby_iget(sb, BABYFS_ROOT_INODE_NO);
   if (IS_ERR(root_vfs_inode)) {
-		ret = PTR_ERR(root_vfs_inode);
-	  goto failed_mount;
-	}
+    ret = PTR_ERR(root_vfs_inode);
+    goto failed_mount;
+  }
 
   // 创建根目录
   sb->s_root = d_make_root(root_vfs_inode);
@@ -173,7 +209,7 @@ struct super_operations babyfs_super_opts = { // 自定义 super_block 操作集
   .statfs       = simple_statfs,        // 给出文件系统的统计信息，例如使用和未使用的数据块的数目，或者文件名的最大长度
   .alloc_inode	= baby_alloc_inode,     // 申请 inode
   .destroy_inode= baby_destroy_inode,   // 释放 inode
-	.write_inode	= baby_write_inode,     // 将 inode 写到磁盘上
+  .write_inode	= baby_write_inode,     // 将 inode 写到磁盘上
   .put_super    = baby_put_super,       // 删除超级块实例的方法
   .evict_inode  = baby_evict_inode,     // 回收 inode 所占用的空间
   .sync_fs      = baby_sync_fs,         // 同步 super_block 到磁盘
@@ -208,7 +244,7 @@ static int __init init_babyfs(void) {
 static void __exit exit_babyfs(void) {
   printk("unloading fs...\n");
   unregister_filesystem(&baby_fs_type);
-	destroy_inodecache();
+  destroy_inodecache();
 }
 
 module_init(init_babyfs);
