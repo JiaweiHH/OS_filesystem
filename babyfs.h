@@ -167,6 +167,10 @@ extern unsigned long baby_count_free_blocks(struct super_block *sb);
 /* file.c */
 extern const struct file_operations baby_file_operations;
 
+/* balloc.c */
+extern unsigned long baby_new_blocks(struct inode *inode, unsigned long *goal,
+                                     unsigned long *count, int *err);
+
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
   return sb->s_fs_info;
