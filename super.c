@@ -80,6 +80,7 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   baby_sb_info->nr_free_blocks = baby_sb->nr_free_blocks;
   baby_sb_info->nr_free_inodes = baby_sb->nr_free_inodes;
   baby_sb_info->last_bitmap_bits = baby_sb->nr_blocks % BABYFS_BIT_PRE_BLOCK;
+  baby_sb_info->nr_bitmap = baby_sb->nr_dstore_blocks - baby_sb->nr_bfree_blocks;
   sb->s_fs_info = baby_sb_info; // superblock 的私有域存放额外信息，包括磁盘上的结构体
   sb->s_maxbytes = baby_max_size(sb); // 设置最大文件大小，在文件写入时起限制作用
 

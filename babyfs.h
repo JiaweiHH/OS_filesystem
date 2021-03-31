@@ -113,7 +113,8 @@ struct baby_sb_info {
   struct buffer_head *s_sbh;
   __le32 nr_free_blocks;
   __le32 nr_free_inodes;
-  __le32 nr_blocks;
+  __le32 nr_blocks; // 数据块数量
+  __le16 nr_bitmap; // bitmap 数量
   __le32 last_bitmap_bits; // 最后一块block bitmap含有的有效bit位数
   
   // 保护这个文件系统上预留窗口的锁
