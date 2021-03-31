@@ -117,14 +117,41 @@ struct baby_sb_info {
   __le32 last_bitmap_bits; // 最后一块block bitmap含有的有效bit位数
 };
 
+/* data type for filesystem-wide blocks number */
+typedef unsigned long baby_fsblk_t;
+
+#define BABY_DEFAULT_RESERVE_BLOCKS     8
+/*max window size: 1024(direct blocks) + 3([t,d]indirect blocks) */
+#define BABY_MAX_RESERVE_BLOCKS         1027
+#define BABY_RESERVE_WINDOW_NOT_ALLOCATED 0
+struct baby_reserve_window {
+  baby_fsblk_t _rsv_start; /* 第一个预留的字节 */ 
+  baby_fsblk_t _rsv_end;	/* 最后一个预留的字节，或为0 */ 
+};
+
+struct baby_reserve_window_node {
+  struct rb_node rsv_node; // 预分配窗口的红黑树
+  __u32 rsv_goal_size; // 预分配的块数量
+  __u32 rsv_alloc_hit; // 跟踪预分配的命中数，即多少次分配是在预留窗口中进行的
+  struct baby_reserve_window rsv_window;
+};
+
+struct baby_block_alloc_info { // 用于跟踪文件的磁盘块分配信息
+  /* information about reservation window */
+  // 采用预分配策略，预分配有关信息
+  struct baby_reserve_window_node rsv_window_node;
+  baby_fsblk_t last_alloc_logical_block; // 上一次分配的逻辑块号
+  baby_fsblk_t last_alloc_physical_block; // 上一次分配的物理块号
+};
+
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
 struct baby_inode_info {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   struct inode vfs_inode;
-  __u32 i_next_alloc_block; /* 下一次分配文件内逻辑块号 */
-  __u32 i_next_alloc_goal;  /* 下一次分配物理块号 */
   __u32 i_dtime;            /* 删除时间 */
+
+  struct baby_block_alloc_info *i_block_alloc_info; // 每一个普通文件都有预留窗口，用来加速磁盘块分配
 };
 
 // 从 vfs inode 返回包含他的 baby_inode_info
