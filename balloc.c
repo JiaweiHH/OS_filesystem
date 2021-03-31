@@ -4,6 +4,80 @@
 #include "babyfs.h"
 
 /**
+ * rsv_window_remove() -- unlink a window from the reservation rb tree
+ * @sb:			super block
+ * @rsv:		reservation window to remove
+ *
+ * Mark the block reservation window as not allocated, and unlink it
+ * from the filesystem reservation window rb tree. Must be called with
+ * rsv_lock held.
+ */
+static void rsv_window_remove(struct super_block *sb,
+			      struct baby_reserve_window_node *rsv)
+{
+	rsv->rsv_start = BABY_RESERVE_WINDOW_NOT_ALLOCATED;
+	rsv->rsv_end = BABY_RESERVE_WINDOW_NOT_ALLOCATED;
+	rsv->rsv_alloc_hit = 0;
+	rb_erase(&rsv->rsv_node, &BABY_SB(sb)->s_rsv_window_root);
+}
+
+/*
+ * rsv_is_empty() -- Check if the reservation window is allocated.
+ * @rsv:		given reservation window to check
+ *
+ * returns 1 if the end block is BABY_RESERVE_WINDOW_NOT_ALLOCATED.
+ */
+static inline int rsv_is_empty(struct ext2_reserve_window *rsv)
+{
+	/* a valid reservation end block could not be 0 */
+	return (rsv->_rsv_end == BABY_RESERVE_WINDOW_NOT_ALLOCATED);
+}
+
+void baby_init_block_alloc_info(struct inode * inode) {
+  struct baby_inode_info *bbi = BABY_I(inode);
+  struct baby2_block_alloc_info *block_i;
+  struct super_block *sb = inode->i_sb;
+
+  block_i = kmalloc(sizeof(*block_i), GFP_NOFS);
+  if (block_i) {
+    struct baby_reserve_window_node *rsv = &block_i->rsv_window_node;
+
+    rsv->rsv_start = BABY_RESERVE_WINDOW_NOT_ALLOCATED;
+    rsv->rsv_end = BABY_RESERVE_WINDOW_NOT_ALLOCATED; // 标识预留窗口为空
+    rsv->rsv_goal_size = BABY_DEFAULT_RESERVE_BLOCKS; // 默认预留窗口大小为8
+    rsv->rsv_alloc_hit = 0;
+    block_i->last_alloc_logical_block = 0; // 上一次分配的逻辑块号
+    block_i->last_alloc_physical_block = 0; // 上一次分配的物理块号
+  }
+  ei->i_block_alloc_info = block_i;
+}
+
+/**
+ * @inode:		inode
+ *
+ * 在下列情况时丢弃当前inode的预留窗口：
+ * 	baby_evict_inode(): inode 被释放时
+ * 	baby_truncate_blocks(): 文件的数据发送重大改变时
+ */
+void baby_discard_reservation(struct inode *inode) {
+	struct baby_inode_info *ei = EXT2_I(inode);
+	struct baby_block_alloc_info *block_i = ei->i_block_alloc_info;
+	struct baby_reserve_window_node *rsv;
+	spinlock_t *rsv_lock = &BABY_SB(inode->i_sb)->s_rsv_window_lock;
+
+	if (!block_i)
+		return;
+
+	rsv = &block_i->rsv_window_node;
+	if (!rsv_is_empty(&rsv->rsv_window)) {
+		spin_lock(rsv_lock);
+		if (!rsv_is_empty(&rsv->rsv_window))
+			rsv_window_remove(inode->i_sb, rsv);
+		spin_unlock(rsv_lock);
+	}
+}
+
+/**
  * 尽最大努力分配连续的磁盘块，仅在一个bitmap管理的数据块中分配
  * 
  * @param goal 建议分配的物理磁盘块号，引用类型，

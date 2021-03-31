@@ -14,27 +14,30 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
                       unsigned long count);
 
 // 根据文件类型初始化文件inode的操作集合
-void init_inode_operations(struct inode *inode, umode_t mode) {
+void file_type_special_operation(struct inode *inode, umode_t mode) {
   switch (mode & S_IFMT) {
-  default: // 创建除了目录和普通文件之外的其他文件
-    // init_special_inode(inode, mode, dev);
-    break;
-  case S_IFREG: // 普通文件
-    inode->i_op = &baby_file_inode_operations;
-    inode->i_fop = &baby_file_operations;
-    inode->i_mapping->a_ops = &baby_aops;
-    break;
-  case S_IFDIR: // 目录文件
-    inode->i_op = &baby_dir_inode_operations;
-    inode->i_fop = &baby_dir_operations;
-    inode->i_mapping->a_ops = &baby_aops;
-    break;
-  case S_IFLNK: // 符号链接文件
-    // TODO 支持快速符号链接
-    inode->i_op = &baby_symlink_inode_operations;
-    inode_nohighmem(inode);
-    inode->i_mapping->a_ops = &baby_aops;
-    break;
+    default:  // 创建除了目录和普通文件之外的其他文件
+      // init_special_inode(inode, mode, dev);
+      break;
+    case S_IFREG:  // 普通文件
+      inode->i_op = &baby_file_inode_operations;
+      inode->i_fop = &baby_file_operations;
+      inode->i_mapping->a_ops = &baby_aops;
+
+      // 普通文件的磁盘块分配使用预留窗口加速
+      baby_init_block_alloc_info(inode);
+      break;
+    case S_IFDIR:  // 目录文件
+      inode->i_op = &baby_dir_inode_operations;
+      inode->i_fop = &baby_dir_operations;
+      inode->i_mapping->a_ops = &baby_aops;
+      break;
+    case S_IFLNK:  // 符号链接文件
+      // TODO 支持快速符号链接
+      inode->i_op = &baby_symlink_inode_operations;
+      inode_nohighmem(inode);
+      inode->i_mapping->a_ops = &baby_aops;
+      break;
   }
 }
 
@@ -100,13 +103,14 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
       vfs_inode->i_ctime.tv_nsec = 0;
   vfs_inode->i_blocks = le32_to_cpu(raw_inode->i_blocknum);
   bbi->i_subdir_num = le16_to_cpu(raw_inode->i_subdir_num);
+  bbi->i_block_alloc_info = NULL;
   for (i = 0; i < BABYFS_N_BLOCKS; i++) { // 拷贝数据块索引数组
     bbi->i_blocks[i] = raw_inode->i_blocks[i];
   }
   vfs_inode->i_private = bbi;
 
-  // 初始化操作集合
-  init_inode_operations(vfs_inode, vfs_inode->i_mode);
+  // 根据文件类型执行特定操作
+  file_type_special_operation(vfs_inode, vfs_inode->i_mode);
 
   brelse(bh);
   unlock_new_inode(vfs_inode);
@@ -408,7 +412,7 @@ static void baby_splice_branch(struct inode *inode, unsigned long block,
       *(partial->p + i) = cpu_to_le32(current_block++);
     }
   }
-  // 更新 next_block
+  
   struct baby_inode_info *inode_info = BABY_I(inode);
   struct baby_block_alloc_info *block_i = inode_info->i_block_alloc_info;
   block_i->last_alloc_logical_block = block + blks - 1;
@@ -601,6 +605,7 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   inode->i_size = 0;
   inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
   bbi->i_subdir_num = 0;
+  bbi->i_block_alloc_info = NULL;
   // bbi->i_blocks[0] = i_no + NR_DSTORE_BLOCKS; // 新 inode 的第一个数据块号
   memset(bbi->i_blocks, 0, sizeof(bbi->i_blocks)); // 初始化索引数组
   // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，
@@ -611,8 +616,8 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
     err = -EIO;
     goto fail;
   }
-  // 初始化操作集合
-  init_inode_operations(inode, inode->i_mode);
+  // 根据文件类型执行特定操作
+  file_type_special_operation(inode, inode->i_mode);
 
   mark_inode_dirty(inode);
 
@@ -1085,6 +1090,8 @@ do_indirects:
     }
   case BABYFS_THIRD_BLOCKS:;
   }
+
+	baby_discard_reservation(inode);
 }
 
 static void baby_truncate_blocks(struct inode *inode, loff_t offset) {
@@ -1115,10 +1122,11 @@ void baby_free_inode(struct inode *inode) {
  * 的释放
  */
 void baby_evict_inode(struct inode *inode) {
+  struct baby_block_alloc_info *rsv;
   int want_delete = 0;
   struct baby_inode_info *inode_info = BABY_I(inode);
   struct baby_sb_info *sb_info = BABY_SB(inode->i_sb);
-  struct address_space *as = &inode->i_data;
+
   // 删除 inode 的占用的 pages
   truncate_inode_pages_final(&inode->i_data);
   // iput可能会用在分配new inode失败时，此时inode未分配数据块，不用真的删除
@@ -1137,7 +1145,14 @@ void baby_evict_inode(struct inode *inode) {
   // 要被删除的文件不需要再同步数据到磁盘了，清空待IO队列
   invalidate_inode_buffers(inode);
   clear_inode(inode);
-  inode_info->i_next_alloc_block = inode_info->i_next_alloc_goal = 0;
+
+  /*释放预留窗口中的块，释放预分配相关数据结构*/
+	baby_discard_reservation(inode);
+	rsv = inode_info->i_block_alloc_info;
+	inode_info->i_block_alloc_info = NULL;
+	if (unlikely(rsv))
+		kfree(rsv);
+  
   if (want_delete) {
     baby_free_inode(inode); // 释放 inode
     sb_info->nr_free_inodes++;

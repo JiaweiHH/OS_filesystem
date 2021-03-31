@@ -115,6 +115,11 @@ struct baby_sb_info {
   __le32 nr_free_inodes;
   __le32 nr_blocks;
   __le32 last_bitmap_bits; // 最后一块block bitmap含有的有效bit位数
+  
+  // 保护这个文件系统上预留窗口的锁
+  spinlock_t s_rsv_window_lock;
+	// 树根，文件系统下所有inode的预分配窗口被组织在这棵红黑树上
+  struct rb_root s_rsv_window_root;
 };
 
 /* data type for filesystem-wide blocks number */
@@ -197,6 +202,8 @@ extern const struct file_operations baby_file_operations;
 /* balloc.c */
 extern unsigned long baby_new_blocks(struct inode *inode, unsigned long *goal,
                                      unsigned long *count, int *err);
+extern void baby_init_block_alloc_info(struct inode *inode);
+extern void baby_discard_reservation(struct inode *inode);
 
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
