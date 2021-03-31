@@ -19,6 +19,7 @@ static int nr_dstore_blocks;  // 保存数据块起始块号
 void optimize_bitmap_datablock(u_int32_t *nr_bfree_blocks, u_int32_t *nr_dstore_blocks, u_int32_t *nr_blocks) {
   if(*nr_dstore_blocks - *nr_bfree_blocks > ((*nr_blocks + BABYFS_BLOCK_SIZE << 3 - 1) / (BABYFS_BLOCK_SIZE << 3))) {
     (*nr_dstore_blocks)--;
+    (*nr_blocks)--;
   }
   return;
 }
