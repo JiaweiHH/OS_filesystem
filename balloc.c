@@ -10,7 +10,7 @@
  */
 
 /**
- * 发送rsv相关错误时打印错误信息 
+ * 发送rsv相关错误时打印错误信息
  */
 static void __rsv_window_dump(struct rb_root *root, int verbose,
                               const char *fn) {
@@ -51,7 +51,7 @@ restart:
   printk("Window map complete.\n");
   BUG_ON(bad);
 }
-#define rsv_window_dump(root, verbose) \
+#define rsv_window_dump(root, verbose)                                         \
   __rsv_window_dump((root), (verbose), __func__)
 
 /**
@@ -138,20 +138,249 @@ void baby_discard_reservation(struct inode *inode) {
   }
 }
 
+// 直接使用 ext2 的
+void rsv_window_add(struct super_block *sb,
+                    struct baby_reserve_window_node *rsv) {
+  struct rb_root *root = &EXT2_SB(sb)->s_rsv_window_root;
+  struct rb_node *node = &rsv->rsv_node;
+  unsigned long start = rsv->rsv_start;
+
+  struct rb_node **p = &root->rb_node;
+  struct rb_node *parent = NULL;
+  struct baby_reserve_window_node *this;
+
+  while (*p) {
+    parent = *p;
+    this = rb_entry(parent, struct baby_reserve_window_node, rsv_node);
+
+    if (start < this->rsv_start)
+      p = &(*p)->rb_left;
+    else if (start > this->rsv_end)
+      p = &(*p)->rb_right;
+    else {
+      rsv_window_dump(root, 1);
+      BUG();
+    }
+  }
+
+  rb_link_node(node, parent, p);
+  rb_insert_color(node, root);
+}
+
+static int
+find_next_reservable_window(struct baby_reserve_window_node *search_head,
+                            struct baby_reserve_window_node *my_rsv,
+                            struct super_block *sb, unisgned long start_block,
+                            unsigned long end_block) {
+  struct rb_node *next;
+  unsigned short size = my_rsv->rsv_goal_size;
+  unsigned long cur = start_block;
+  struct baby_reserve_window_node *rsv = search_head, *prev = NULL;
+
+  while (1) {
+    // 从当前 rsv 之外开始找
+    if (cur <= rsv->rsv_end)
+      cur = rsv->rsv_end + 1;
+    if (cur > end_block)
+      return -1;
+
+    prev = rsv;
+    next = rb_next(&rsv->rsv_node);
+    rsv = rb_entry(next, struct baby_reserve_window_node, rsv_node);
+    if (!next)
+      break;
+
+    // 找到了一个足够容纳 size 大小的空间
+    if (cur + size <= rsv->rsv_start)
+      break;
+  }
+
+  // 下列条件成立，说明这次找到的和上一次使用的预留窗口不是相邻的关系
+  // 是相邻的关系可以直接更改 my_rsv 的字段值
+  // 不是相邻的关系需要先移除红黑树，因为直接修改会导致红黑树 不“有序”
+  if ((prev != my_rsv) && (!rsv_is_empty(&my_rsv->rsv_window)))
+    rsv_window_remove(sb, my_rsv);
+
+  my_rsv->rsv_start = cur;
+  my_rsv->rsv_end = cur + size - 1;
+  my_rsv->rsv_alloc_hit = 0;
+  if (prev != my_rsv)
+    rsv_window_add(sb, my_rsv);
+
+  return 0;
+}
+
+static struct baby_reserve_window_node *
+search_reserve_window(struct rb_root *root, unsigned long goal) {
+  struct rb_node *n = root->rb_node;
+  struct baby_reserve_window_node *rsv;
+
+  if (!n)
+    return NULL;
+
+  do {
+    rsv = rb_entry(n, struct baby_reserve_window_node, rsv_node);
+
+    if (goal < rsv->rsv_start)
+      n = n->rb_left;
+    else if (goal > rsv->rsv_end)
+      n = n->rb_right;
+    else
+      return rsv;
+  } while (n);
+  /*
+   * We've fallen off the end of the tree: the goal wasn't inside
+   * any particular node.  OK, the previous node must be to one
+   * side of the interval containing the goal.  If it's the RHS,
+   * we need to back up one.
+   */
+  if (rsv->rsv_start > goal) {
+    n = rb_prev(&rsv->rsv_node);
+    rsv = rb_entry(n, struct baby_reserve_window_node, rsv_node);
+  }
+  return rsv;
+}
+
+static unsigned int bitmap_search_next_usable_block(unsigned int rsv_start,
+                                                    unsigned int end,
+                                                    struct buffer_head *bh) {
+  unsigned long next;
+  next = baby_find_next_zero_bit(bh->b_data, end, rsv_start);
+  if (next >= end)
+    return -1;
+  return next;
+}
+//&first_free_block, bitmap_no_1, bh[0], my_rsv
+static int find_first_free_block(int *first_free_block,
+                                 unsigned long *start_block,
+                                 unsigned int bitmap_no, struct buffer_head *bh,
+                                 struct baby_reserve_window_node *my_rsv) {
+  *first_free_block = bitmap_search_next_usable_block(
+      my_rsv->rsv_start - bitmap_no * BABYFS_BIT_PRE_BLOCK, bh);
+  if (*first_free_block == -1)
+    return -1;
+  *start_block = bitmap_no * BABYFS_BIT_PRE_BLOCK + *first_free_block;
+  if (*start_block >= my_rsv->rsv_start && start_block <= my_rsv->end)
+    return 0;
+  return 1;
+}
+
 /**
  * 重新初始化预留窗口
  */
 static int alloc_new_reservation(struct baby_reserve_window_node *my_rsv,
-    unsigned int bitmap_no, unsigned int bitmap_offset)
-{}
+                                 unsigned int bitmap_no,
+                                 unsigned int bitmap_offset,
+                                 struct super_block *sb,
+                                 struct buffer_head **bh) {
+  struct baby_reserve_window_node *search_head = NULL;
+  struct baby_sb_info *sb_info = BABY_SB(sb);
+  struct baby_super_block *b_sb = sb_info->s_babysb;
+  struct rb_root *rsv_root = sb_info->s_rsv_window_root;
+
+  // 确定 rsv 起始搜索位置，要么是 goal，要么是 bitmap 第一个
+  unsigned long start_block,
+      map_first_block = sb_info->s_babysb->nr_dstore_blocks +
+                        bitmap_no * BABYFS_BIT_PRE_BLOCK,
+      end_block = sb_info->s_babysb->nr_dstore_blocks + sb_info->nr_blocks;
+  if (bitmap_offset < 0)
+    start_block = first_block;
+  else
+    start_block = first_block + bitmap_offset;
+
+  unsigned short size = my_rsv->rsv_goal_size;
+
+  /*
+   * 在未能从上一个窗口分配的时候，控制流将进入这里
+   * 如果之前命中率高，那么就提高窗口大小
+   */
+  if (!rsv_is_empty(&my_rsv->rsv_window)) {
+    if(my_rsv->rsv_alloc_hit > (my_rsv->rsv_end - my_rsv->rsv_start + 1) / 2) {
+      size = size * 2;
+			if (size > BABY_MAX_RESERVE_BLOCKS)
+				size = BABY_MAX_RESERVE_BLOCKS;
+			my_rsv->rsv_goal_size= size;
+    }
+  }
+
+  // 查询是否有窗口包含了 goal
+  // 没有的话返回 goal 之前的一个窗口
+  search_head = search_reserve_window(rb_root, start_block);
+
+  unsigned short bitmap_no_1, bitmap_no_2;
+  int first_free_block;
+  struct buffer_head **bh_temp = NULL;
+retry:
+  // 以 search_head 为起点，查询一个可以容纳 my_rsv
+  // 并且不与其他预留窗口重叠的新的预留窗口
+  ret = find_next_reservable_window(search_head, my_rsv, sb, start_block,
+                                    end_block);
+
+  // retry 失败，移除上一次 add 的 node
+  if (ret == -1) {
+    if (!rsv_is_empty(&my_rsv->rsv_window))
+      rsv_window_remove(sb, my_rsv);
+    return -1;
+  }
+
+  // 根据预留窗口是否跨越 bitmap 来读取 buffer_head
+  bitmap_no_1 = my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK;
+  bh[0] = sb_bread(sb, b_sb->nr_bfree_blocks + bitmap_no_1);
+  // 找到 bitmap 中的第一个 free_block
+  first_free_block = bitmap_search_next_usable_block(
+      my_rsv->rsv_start - bitmap_no_1 * BABYFS_BIT_PRE_BLOCK,
+      BABYFS_BIT_PRE_BLOCK, bh[0]);
+  if (first_free_block > 0) {
+    // 更新 start_block
+    start_block = first_free_block + bitmap_no_1 * BABYFS_BIT_PRE_BLOCK;
+    // 判断 free block 是不是在 rsv 内
+    if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end)
+      return 0;
+  }
+  // 检查可能出现的第二个 bitmap
+  bitmap_no_2 = my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK;
+  if (bitmap_no_1 != bitmap_no_2) {
+    bh[1] = sb_bread(sb, bitmap_no_2 + b_sb->nr_bfree_blocks);
+    first_free_block = bitmap_search_next_usable_block(
+        0, my_rsv->rsv_end - bitmap_no_2 * BABYFS_BIT_PRE_BLOCK, bh[1]);
+    if (first_free_block == -1)
+      goto prepare_retry;
+    // 更新 start_block
+    start_block = first_free_block + bitmap_no_2 * BABYFS_BIT_PRE_BLOCK;
+    // 判断 free block 是不是在 rsv 内
+    if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end)
+      return 0;
+  }
+
+prepare_retry:
+  // 移除上一次分配的，以上一次分配的开始，尝试下一次分配
+  if (!rsv_is_empty(&my_rsv->rsv_window))
+    rsv_window_remove(sb, my_rsv);
+
+  search_head = my_rsv;
+  goto retry;
+}
 
 /*
  * 尝试将预留窗口向后扩展大小为size的空间，最多扩展至红黑树中下一个预留窗口的上边界。
  * 这里扩展空间只会考虑和其他预留窗口的冲突。
  */
 static void try_to_extend_reservation(struct baby_reserve_window_node *my_rsv,
-      struct super_block *sb, int size)
-{}
+                                      struct super_block *sb, int size) {
+  struct baby_reserve_window_node *next_rsv = NULL;
+  struct rb_node *next;
+
+  next = rb_next(&my_rsv->rb_node);
+  if(!next)
+    my_rsv->rsv_end += size;
+  else {
+    next_rsv = rb_entry(next, struct baby_reserve_window_node, rsv_node);
+    if(next_rsv->rsv_start - my_rsv->rsv_end - 1 >= size)
+      my_rsv->rsv_end += size;
+    else
+      my_rsv->rsv_end = next_rsv->rsv_start - 1;
+  }
+}
 
 /**
  * 在一个指定范围内分配磁盘块，范围由窗口指定
@@ -161,7 +390,6 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
                                          unsigned int bitmap_offset,
                                          unsigned long *count,
                                          struct baby_reserve_window *my_rsv) {}
-
 
 /**
  * @sb:			superblock
@@ -180,6 +408,9 @@ static baby_fsblk_t baby_try_to_allocate_with_rsv(
   baby_fsblk_t ret = 0;
   unsigned long num = *count;
 
+  struct buffer_head *bh_array[2] = {
+      0}; // bh 数组用来存放可能读取到的相邻两个 bitmap
+
   if (my_rsv == NULL) { // (非普通文件)不使用预留窗口分配数据块
     return baby_try_to_allocate(sb, bitmap_no, bitmap_offset, count, NULL);
   }
@@ -188,7 +419,8 @@ static baby_fsblk_t baby_try_to_allocate_with_rsv(
    * 根据预留窗口和goal分配磁盘块
    * 预留窗口会在下列情况发生重新初始化：
    * 1. 预分配窗户口还未初始化
-   * 2. 上一次实际块占用行为没有成功，即并发情况下预留窗口中的块被其他分配进程占用了，
+   * 2.
+   * 上一次实际块占用行为没有成功，即并发情况下预留窗口中的块被其他分配进程占用了，
    *    或者上次分配时没有用完的块被其他进程占用了
    * 3. goal不在预留窗口中
    *
@@ -209,7 +441,8 @@ static baby_fsblk_t baby_try_to_allocate_with_rsv(
         my_rsv->rsv_goal_size = *count;
 
       // 重新分配预留窗口
-      ret = alloc_new_reservation(my_rsv, bitmap_no, bitmap_offset);
+      ret =
+          alloc_new_reservation(my_rsv, bitmap_no, bitmap_offset, sb, bh_array);
       if (ret < 0)
         break; /* failed */
 
