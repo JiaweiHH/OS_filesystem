@@ -141,7 +141,7 @@ void baby_discard_reservation(struct inode *inode) {
 // 直接使用 ext2 的
 void rsv_window_add(struct super_block *sb,
                     struct baby_reserve_window_node *rsv) {
-  struct rb_root *root = &EXT2_SB(sb)->s_rsv_window_root;
+  struct rb_root *root = &BABY_SB(sb)->s_rsv_window_root;
   struct rb_node *node = &rsv->rsv_node;
   unsigned long start = rsv->rsv_start;
 
@@ -295,11 +295,11 @@ static int alloc_new_reservation(struct baby_reserve_window_node *my_rsv,
    * 如果之前命中率高，那么就提高窗口大小
    */
   if (!rsv_is_empty(&my_rsv->rsv_window)) {
-    if(my_rsv->rsv_alloc_hit > (my_rsv->rsv_end - my_rsv->rsv_start + 1) / 2) {
+    if (my_rsv->rsv_alloc_hit > (my_rsv->rsv_end - my_rsv->rsv_start + 1) / 2) {
       size = size * 2;
-			if (size > BABY_MAX_RESERVE_BLOCKS)
-				size = BABY_MAX_RESERVE_BLOCKS;
-			my_rsv->rsv_goal_size= size;
+      if (size > BABY_MAX_RESERVE_BLOCKS)
+        size = BABY_MAX_RESERVE_BLOCKS;
+      my_rsv->rsv_goal_size = size;
     }
   }
 
@@ -307,9 +307,8 @@ static int alloc_new_reservation(struct baby_reserve_window_node *my_rsv,
   // 没有的话返回 goal 之前的一个窗口
   search_head = search_reserve_window(rb_root, start_block);
 
-  unsigned short bitmap_no_1, bitmap_no_2;
+  int bitmap_no_1 = -1, bitmap_no_2;
   int first_free_block;
-  struct buffer_head **bh_temp = NULL;
 retry:
   // 以 search_head 为起点，查询一个可以容纳 my_rsv
   // 并且不与其他预留窗口重叠的新的预留窗口
@@ -323,9 +322,19 @@ retry:
     return -1;
   }
 
-  // 根据预留窗口是否跨越 bitmap 来读取 buffer_head
-  bitmap_no_1 = my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK;
-  bh[0] = sb_bread(sb, b_sb->nr_bfree_blocks + bitmap_no_1);
+  // 读取第一个 bitmap
+  if (bitmap_no_1 != my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK) { // 非连续
+    if (bitmap_no_1 != -1) // 第一次进入不需要释放
+      brelse(bh[0]);
+    bitmap_no_1 = my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK;
+    bh[0] = sb_bread(sb, b_sb->nr_bfree_blocks + bitmap_no_1);
+  }
+
+  // 检查可能出现的第二个 bitmap
+  bitmap_no_2 = my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK;
+  if (bitmap_no_1 != bitmap_no_2)
+    bh[1] = sb_bread(sb, b_sb->nr_bfree_blocks + bitmap_no_2);
+
   // 找到 bitmap 中的第一个 free_block
   first_free_block = bitmap_search_next_usable_block(
       my_rsv->rsv_start - bitmap_no_1 * BABYFS_BIT_PRE_BLOCK,
@@ -336,26 +345,40 @@ retry:
     // 判断 free block 是不是在 rsv 内
     if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end)
       return 0;
-  }
-  // 检查可能出现的第二个 bitmap
-  bitmap_no_2 = my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK;
-  if (bitmap_no_1 != bitmap_no_2) {
-    bh[1] = sb_bread(sb, bitmap_no_2 + b_sb->nr_bfree_blocks);
-    first_free_block = bitmap_search_next_usable_block(
-        0, my_rsv->rsv_end - bitmap_no_2 * BABYFS_BIT_PRE_BLOCK, bh[1]);
-    if (first_free_block == -1)
+    else // bh[0]中有空闲的，从空闲位重新分配
       goto prepare_retry;
-    // 更新 start_block
-    start_block = first_free_block + bitmap_no_2 * BABYFS_BIT_PRE_BLOCK;
-    // 判断 free block 是不是在 rsv 内
-    if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end)
-      return 0;
+  }
+  
+  if (bitmap_no_1 != bitmap_no_2) { // 第一个bitmap没找到，且rsv跨bitmap
+    bh[1] = sb_bread(sb, bitmap_no_2 + b_sb->nr_bfree_blocks);
+    first_free_block =
+        bitmap_search_next_usable_block(0, BABYFS_BIT_PRE_BLOCK, bh[1]);
+    if (first_free_block > 0) {
+      // 更新 start_block
+      start_block = first_free_block + bitmap_no_2 * BABYFS_BIT_PRE_BLOCK;
+      // 判断 free block 是不是在 rsv 内
+      if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end)
+        return 0;
+      else { // bh[1]中有空闲的，释放第一个bh，保留第二个bh做下次分配
+        brelse(bh[0]);
+        bh[0] = bh[1];
+        bh[1] = NULL;
+        bitmap_no_1 = bitmap_no_2;
+      }
+    } else { // bh[0]和bh[1]中都不存在空闲位，释放全部bh
+      brelse(bh[0]);
+      brelse(bh[1]);
+      bh[0] = bh[1] = NULL;
+      start_block = (bitmap_no_2 + 1) * BABYFS_BIT_PRE_BLOCK;
+      bitmap_no_1 = -1;
+    }
+  } else { // bh[0]中不存在空闲位 且 rsv不跨bitmap，释放第一个bh
+    brelse(bh[0]);
+    start_block = (bitmap_no_1 + 1) * BABYFS_BIT_PRE_BLOCK;
+    bitmap_no_1 = -1;
   }
 
 prepare_retry:
-  // 移除上一次分配的，以上一次分配的开始，尝试下一次分配
-  if (!rsv_is_empty(&my_rsv->rsv_window))
-    rsv_window_remove(sb, my_rsv);
 
   search_head = my_rsv;
   goto retry;
@@ -369,6 +392,9 @@ static void try_to_extend_reservation(struct baby_reserve_window_node *my_rsv,
                                       struct super_block *sb, int size) {
   struct baby_reserve_window_node *next_rsv = NULL;
   struct rb_node *next;
+  spinlock_t *rsv_lock = &BABY_SB(sb)->s_rsv_window_lock;
+  if (!spin_trylock(rsv_lock))
+    return;
 
   next = rb_next(&my_rsv->rb_node);
   if(!next)
@@ -380,6 +406,7 @@ static void try_to_extend_reservation(struct baby_reserve_window_node *my_rsv,
     else
       my_rsv->rsv_end = next_rsv->rsv_start - 1;
   }
+  spin_unlock(rsv_lock);
 }
 
 /**
@@ -389,7 +416,8 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
                                          unsigned int bitmap_no,
                                          unsigned int bitmap_offset,
                                          unsigned long *count,
-                                         struct baby_reserve_window *my_rsv) {}
+                                         struct baby_reserve_window *my_rsv,
+                                         struct buffer_head **bh) {}
 
 /**
  * @sb:			superblock
@@ -408,11 +436,11 @@ static baby_fsblk_t baby_try_to_allocate_with_rsv(
   baby_fsblk_t ret = 0;
   unsigned long num = *count;
 
-  struct buffer_head *bh_array[2] = {
-      0}; // bh 数组用来存放可能读取到的相邻两个 bitmap
+  // bh 数组用来存放可能读取到的相邻两个 bitmap
+  struct buffer_head *bh_array[2] = {0};
 
   if (my_rsv == NULL) { // (非普通文件)不使用预留窗口分配数据块
-    return baby_try_to_allocate(sb, bitmap_no, bitmap_offset, count, NULL);
+    return baby_try_to_allocate(sb, bitmap_no, bitmap_offset, count, NULL, NULL);
   }
 
   /**
@@ -435,39 +463,45 @@ static baby_fsblk_t baby_try_to_allocate_with_rsv(
     if (rsv_is_empty(&my_rsv->rsv_window) || (ret < 0) ||
         !goal_in_my_reservation(&my_rsv->rsv_window, bitmap_no,
                                 bitmap_offset)) {
-
-      if (my_rsv->rsv_goal_size <
-          *count) // 新分配的预留窗口大小至少等于本次分配需求的数据块个数
+      
+      // 新分配的预留窗口大小至少等于本次分配需求的数据块个数
+      if (my_rsv->rsv_goal_size < *count)
         my_rsv->rsv_goal_size = *count;
 
       // 重新分配预留窗口
       ret =
           alloc_new_reservation(my_rsv, bitmap_no, bitmap_offset, sb, bh_array);
-      if (ret < 0)
+      if (ret < 0) // 整个磁盘块都分配不出新的窗口
         break; /* failed */
 
-      // 分配新的窗口时会尽量使goal在窗口内，若不能办到，则设置grp_goal为-1，表示下面不使用grp_goal
+      // 分配新的窗口时会尽量使goal在窗口内，若不能办到，则设置goal为-1，表示真正分配时不使用goal
       if (!goal_in_my_reservation(&my_rsv->rsv_window, bitmap_no,
                                   bitmap_offset))
         bitmap_offset = -1;
-    } else if (bitmap_offset >=
-               0) { // 如果文件有预留窗口而且指定了grp_goal且goal在预留窗口中
+    } else { // 文件有预留窗口且goal在预留窗口中，只有第一次循环才有可能进入该执行流
       // 计算grp_goal到窗口尾部共有几个空闲块，即可分配区域长度
       int curr = my_rsv->rsv_end -
                  (bitmap_no * BABYFS_BIT_PRE_BLOCK + bitmap_offset) + 1;
       // 若可分配长度比需要分配的数量小，则尝试扩大预留窗口到满足所需，也有可能不能扩大这么多
       if (curr < *count)
         try_to_extend_reservation(my_rsv, sb, *count - curr);
+
+      // 读出当前预留窗口的bh
+      bh_array[0] = sb_bread(sb, my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK + b_sb->nr_bfree_blocks);
+      if (my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK != my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK) {
+        bh_array[1] = sb_bread(sb, my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK + b_sb->nr_bfree_blocks);
+      }
     }
 
     // 若预留窗口超过了可分配范围，则报错
     if ((my_rsv->rsv_start > bbi->nr_block) || (my_rsv->rsv_end < 0)) {
-      rsv_window_dump(&EXT2_SB(sb)->s_rsv_window_root, 1);
+      rsv_window_dump(&BABY_SB(sb)->s_rsv_window_root, 1);
       BUG();
     }
     // 将预留窗口中预分配的数据块，在其所属块组位图上对应的bit置1，即正式占用
     ret = baby_try_to_allocate(sb, bitmap_no, bitmap_offset, &num,
-                               &my_rsv->rsv_window);
+                               &my_rsv->rsv_window, bh_array);
+    
     if (ret >= 0) { // 如果分配成功，统计预留窗口中已分配数量后退出循环
       my_rsv->rsv_alloc_hit += num; // 统计预留窗口中已分配数量
       *count = num;                 // 返回分配到的块数
@@ -537,7 +571,6 @@ retry_alloc:
 
   // 获取 bitmap 偏移值
   bitmap_offset = (goal - b_sb->nr_dstore_blocks) % BABYFS_BIT_PRE_BLOCK;
-  bitmap_bh = sb_bread(sb, bitmap_no + b_sb->nr_bfree_blocks);
 
   // 尝试分配
   alloc_no =
@@ -558,9 +591,6 @@ retry_alloc:
 allocated:
   ret_block = alloc_no;
   sb_info->nr_free_blocks -= num;
-  if (sb->s_flags & SB_SYNCHRONOUS)
-    sync_dirty_buffer(bitmap_bh);
-  // brelse(bitmap_bh);
   *err = 0;
   if (num < *count) {
     *count = num;
@@ -569,6 +599,5 @@ allocated:
   return ret_block;
 
 out:
-  // brelse(bitmap_bh);
   return 0;
 }

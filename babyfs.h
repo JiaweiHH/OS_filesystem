@@ -150,6 +150,9 @@ struct baby_block_alloc_info { // 用于跟踪文件的磁盘块分配信息
   baby_fsblk_t last_alloc_physical_block; // 上一次分配的物理块号
 };
 
+#define rsv_start rsv_window._rsv_start
+#define rsv_end rsv_window._rsv_end
+
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
 struct baby_inode_info {
   __le16 i_subdir_num;              /* 子目录项数量 */
