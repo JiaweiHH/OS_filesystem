@@ -108,6 +108,9 @@ struct dir_record {
 
 #ifdef __KERNEL__
 
+#define rsv_start rsv_window._rsv_start
+#define rsv_end rsv_window._rsv_end
+
 struct baby_sb_info {
   struct baby_super_block *s_babysb;
   struct buffer_head *s_sbh;
@@ -149,9 +152,6 @@ struct baby_block_alloc_info { // 用于跟踪文件的磁盘块分配信息
   baby_fsblk_t last_alloc_logical_block; // 上一次分配的逻辑块号
   baby_fsblk_t last_alloc_physical_block; // 上一次分配的物理块号
 };
-
-#define rsv_start rsv_window._rsv_start
-#define rsv_end rsv_window._rsv_end
 
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
 struct baby_inode_info {
@@ -204,7 +204,7 @@ extern unsigned long baby_count_free_blocks(struct super_block *sb);
 extern const struct file_operations baby_file_operations;
 
 /* balloc.c */
-extern unsigned long baby_new_blocks(struct inode *inode, unsigned long *goal,
+extern unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
                                      unsigned long *count, int *err);
 extern void baby_init_block_alloc_info(struct inode *inode);
 extern void baby_discard_reservation(struct inode *inode);

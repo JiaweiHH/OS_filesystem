@@ -296,7 +296,7 @@ static int baby_alloc_blocks(struct inode *inode, unsigned long goal,
   int ret = 0, i = 0;
   while (1) {
     count = target;
-    current_block = baby_new_blocks(inode, &next_goal, &count, err);
+    current_block = baby_new_blocks(inode, next_goal, &count, err);
     if (*err) {
       goto failed_out;
     }
