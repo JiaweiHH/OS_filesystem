@@ -14,7 +14,7 @@ install:
 uninstall:
 	sudo rmmod babyfs
 mkimg:
-	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1M count=2048 && ./mkfs.babyfs ./test.img
+	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1M count=50 && ./mkfs.babyfs ./test.img
 mount:
 	mkdir test && sudo mount -t babyfs -o loop ./test.img ./test
 umount:

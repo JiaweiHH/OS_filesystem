@@ -111,23 +111,8 @@ struct dir_record {
 #define rsv_start rsv_window._rsv_start
 #define rsv_end rsv_window._rsv_end
 
-struct baby_sb_info {
-  struct baby_super_block *s_babysb;
-  struct buffer_head *s_sbh;
-  __le32 nr_free_blocks;
-  __le32 nr_free_inodes;
-  __le32 nr_blocks; // 数据块数量
-  __le16 nr_bitmap; // bitmap 数量
-  __le32 last_bitmap_bits; // 最后一块block bitmap含有的有效bit位数
-  
-  // 保护这个文件系统上预留窗口的锁
-  spinlock_t s_rsv_window_lock;
-	// 树根，文件系统下所有inode的预分配窗口被组织在这棵红黑树上
-  struct rb_root s_rsv_window_root;
-};
-
 /* data type for filesystem-wide blocks number */
-typedef unsigned long baby_fsblk_t;
+typedef long long baby_fsblk_t;
 
 #define BABY_DEFAULT_RESERVE_BLOCKS     8
 /*max window size: 1024(direct blocks) + 3([t,d]indirect blocks) */
@@ -151,6 +136,22 @@ struct baby_block_alloc_info { // 用于跟踪文件的磁盘块分配信息
   struct baby_reserve_window_node rsv_window_node;
   baby_fsblk_t last_alloc_logical_block; // 上一次分配的逻辑块号
   baby_fsblk_t last_alloc_physical_block; // 上一次分配的物理块号
+};
+
+struct baby_sb_info {
+  struct baby_super_block *s_babysb;
+  struct buffer_head *s_sbh;
+  __le32 nr_free_blocks;
+  __le32 nr_free_inodes;
+  __le32 nr_blocks; // 数据块数量
+  __le16 nr_bitmap; // bitmap 数量
+  __le32 last_bitmap_bits; // 最后一块block bitmap含有的有效bit位数
+  
+  // 保护这个文件系统上预留窗口的锁
+  spinlock_t s_rsv_window_lock;
+	// 树根，文件系统下所有inode的预分配窗口被组织在这棵红黑树上
+  struct rb_root s_rsv_window_root;
+	struct baby_reserve_window_node s_rsv_window_head;
 };
 
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
@@ -208,6 +209,8 @@ extern unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
                                      unsigned long *count, int *err);
 extern void baby_init_block_alloc_info(struct inode *inode);
 extern void baby_discard_reservation(struct inode *inode);
+extern void rsv_window_add(struct super_block *sb,
+                           struct baby_reserve_window_node *rsv);
 
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {

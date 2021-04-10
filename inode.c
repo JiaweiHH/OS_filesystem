@@ -319,7 +319,7 @@ static int baby_alloc_blocks(struct inode *inode, unsigned long goal,
   return ret;
 
 failed_out:
-  printk(KERN_ERR "baby_alloc_blocks failed_out");
+  printk(KERN_ERR "baby_alloc_blocks failed_out\n");
   for (i = 0; i < index; ++i) { // 依次释放所有已分配的磁盘块
     baby_free_blocks(inode, new_blocks[i], 1);
   }
@@ -1066,7 +1066,7 @@ do_indirects:
   switch (offsets[0]) {
   default: // 如果offsets[0]是直接块，则释放所有间接索引
     nr = i_blocks[BABYFS_PRIMARY_BLOCK];
-    printk("BABYFS_PRIMARY_BLOCK: %d\n", nr);
+    // printk("BABYFS_PRIMARY_BLOCK: %d\n", nr);
     if (nr) {
       i_blocks[BABYFS_PRIMARY_BLOCK] = 0; // 先重置i_blocks对应位
       mark_inode_dirty(inode);
@@ -1074,7 +1074,7 @@ do_indirects:
     }
   case BABYFS_PRIMARY_BLOCK: // 如果offsets[0]是一级索引，则释放二级和三级索引
     nr = i_blocks[BABYFS_SECONDRTY_BLOCK];
-    printk("BABYFS_SECONDRTY_BLOCK: %d\n", nr);
+    // printk("BABYFS_SECONDRTY_BLOCK: %d\n", nr);
     if (nr) {
       i_blocks[BABYFS_SECONDRTY_BLOCK] = 0;
       mark_inode_dirty(inode);
@@ -1082,7 +1082,7 @@ do_indirects:
     }
   case BABYFS_SECONDRTY_BLOCK: // 如果offsets[0]是二级索引，则释放三级索引
     nr = i_blocks[BABYFS_THIRD_BLOCKS];
-    printk("BABYFS_THIRD_BLOCKS: %d\n", nr);
+    // printk("BABYFS_THIRD_BLOCKS: %d\n", nr);
     if (nr) {
       i_blocks[BABYFS_THIRD_BLOCKS] = 0;
       mark_inode_dirty(inode);

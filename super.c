@@ -82,7 +82,24 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   baby_sb_info->last_bitmap_bits = baby_sb->nr_blocks % BABYFS_BIT_PRE_BLOCK;
   baby_sb_info->nr_bitmap = baby_sb->nr_dstore_blocks - baby_sb->nr_bfree_blocks;
   sb->s_fs_info = baby_sb_info; // superblock 的私有域存放额外信息，包括磁盘上的结构体
-  sb->s_maxbytes = baby_max_size(sb); // 设置最大文件大小，在文件写入时起限制作用
+  // TODO 测试小文件系统的时候需要注释掉最大文件限制，不然会报错
+  // sb->s_maxbytes = baby_max_size(sb); // 设置最大文件大小，在文件写入时起限制作用
+
+  /* per fileystem reservation list head & lock */
+	spin_lock_init(&baby_sb_info->s_rsv_window_lock);
+	baby_sb_info->s_rsv_window_root = RB_ROOT;
+	/*
+	 * Add a single, static dummy reservation to the start of the
+	 * reservation window list --- it gives us a placeholder for
+	 * append-at-start-of-list which makes the allocation logic
+	 * _much_ simpler.
+	 */
+	baby_sb_info->s_rsv_window_head.rsv_start = BABY_RESERVE_WINDOW_NOT_ALLOCATED;
+	baby_sb_info->s_rsv_window_head.rsv_end = BABY_RESERVE_WINDOW_NOT_ALLOCATED;
+	baby_sb_info->s_rsv_window_head.rsv_alloc_hit = 0;
+	baby_sb_info->s_rsv_window_head.rsv_goal_size = 0;
+  // 头结点加入预留窗口红黑树
+	rsv_window_add(sb, &baby_sb_info->s_rsv_window_head);
 
   // 获取磁盘存储的 inode 结构体
   root_vfs_inode = baby_iget(sb, BABYFS_ROOT_INODE_NO);
