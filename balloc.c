@@ -1,13 +1,13 @@
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
-#include <linux/buffer_head.h>
 
 #include "babyfs.h"
 
 void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn) {
-  printk("%s dump_myrsv: start %lu end %lu size %d hit %d\n", fn, my_rsv->rsv_start,
-         my_rsv->rsv_end, my_rsv->rsv_goal_size, my_rsv->rsv_alloc_hit);
+  printk("%s dump_myrsv: start %lu end %lu size %d hit %d\n", fn,
+         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_goal_size,
+         my_rsv->rsv_alloc_hit);
 }
 #define dump_myrsv(rsv) __dump_myrsv(rsv, __func__)
 
@@ -245,9 +245,8 @@ search_reserve_window(struct rb_root *root, unsigned long goal) {
   return rsv;
 }
 
-static int bitmap_search_next_usable_block(unsigned int start,
-                                                    unsigned int end,
-                                                    struct buffer_head *bh) {
+static int bitmap_search_next_usable_block(unsigned int start, unsigned int end,
+                                           struct buffer_head *bh) {
   int next;
   next = baby_find_next_zero_bit(bh->b_data, end, start);
   if (next >= end)
@@ -259,8 +258,7 @@ static int bitmap_search_next_usable_block(unsigned int start,
  * 重新初始化预留窗口
  */
 static int alloc_new_reservation(struct baby_reserve_window_node *my_rsv,
-                                 baby_fsblk_t goal,
-                                 struct super_block *sb,
+                                 baby_fsblk_t goal, struct super_block *sb,
                                  struct buffer_head **bh) {
   struct baby_reserve_window_node *search_head = NULL;
   struct baby_sb_info *sb_info = BABY_SB(sb);
@@ -269,7 +267,7 @@ static int alloc_new_reservation(struct baby_reserve_window_node *my_rsv,
 
   // 确定 rsv 起始搜索位置，要么是 goal，要么是 bitmap 第一个
   unsigned long start_block = goal > 0 ? goal : 0,
-      end_block = NR_DSTORE_BLOCKS + sb_info->nr_blocks - 1;
+                end_block = sb_info->nr_blocks - 1;
 
   unsigned short size = my_rsv->rsv_goal_size;
 
@@ -299,7 +297,8 @@ retry:
   // 并且不与其他预留窗口重叠的新的预留窗口
   ret = find_next_reservable_window(search_head, my_rsv, sb, start_block,
                                     end_block);
-  printk("alloc_new_reservation: find_next_reservable_window done, ret %d\n", ret);
+  printk("alloc_new_reservation: find_next_reservable_window done, ret %d\n",
+         ret);
   // retry 失败，移除上一次 add 的 node
   if (ret == -1) {
     if (!rsv_is_empty(&my_rsv->rsv_window))
@@ -314,30 +313,34 @@ retry:
       brelse(bh[0]);
     bitmap_no_1 = my_rsv->rsv_start / BABYFS_BIT_PRE_BLOCK;
     bh[0] = sb_bread(sb, bitmap_no_1 + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
-    printk("alloc_new_reservation: read bitmap_1 block NO.%d\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE + bitmap_no_1);
+    printk("alloc_new_reservation: read bitmap_1 block NO.%d\n",
+           BABYFS_DATA_BIT_MAP_BLOCK_BASE + bitmap_no_1);
   }
 
   // 检查可能出现的第二个 bitmap
   bitmap_no_2 = my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK;
   if (bitmap_no_1 != bitmap_no_2) {
     bh[1] = sb_bread(sb, bitmap_no_2 + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
-    printk("alloc_new_reservation: read bitmap_2 block NO.%d\n", bitmap_no_2+BABYFS_DATA_BIT_MAP_BLOCK_BASE);
+    printk("alloc_new_reservation: read bitmap_2 block NO.%d\n",
+           bitmap_no_2 + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
   }
 
   // 找到 bitmap 中的第一个 free_block
   first_free_block = bitmap_search_next_usable_block(
       my_rsv->rsv_start - bitmap_no_1 * BABYFS_BIT_PRE_BLOCK,
       BABYFS_BIT_PRE_BLOCK, bh[0]);
-  printk("alloc_new_reservation: first_free_block %d, start %d, end %d,bh %c", first_free_block,  my_rsv->rsv_start - bitmap_no_1 * BABYFS_BIT_PRE_BLOCK, BABYFS_BIT_PRE_BLOCK, *((char *)(bh[0]->b_data)));
+  printk("alloc_new_reservation: first_free_block %d, start %d, end %d,bh %c",
+         first_free_block,
+         my_rsv->rsv_start - bitmap_no_1 * BABYFS_BIT_PRE_BLOCK,
+         BABYFS_BIT_PRE_BLOCK, *((char *)(bh[0]->b_data)));
   if (first_free_block > 0) {
     // 更新 start_block
     start_block = first_free_block + bitmap_no_1 * BABYFS_BIT_PRE_BLOCK;
     // 判断 free block 是不是在 rsv 内
-    if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end){
+    if (start_block >= my_rsv->rsv_start && start_block <= my_rsv->rsv_end) {
       printk("alloc_new_reservation: get a rsv start_block %lu\n", start_block);
       return 0;
-    }
-    else // bh[0]中有空闲的，从空闲位重新分配
+    } else // bh[0]中有空闲的，从空闲位重新分配
       goto prepare_retry;
   }
 
@@ -402,12 +405,12 @@ static void try_to_extend_reservation(struct baby_reserve_window_node *my_rsv,
 
 /**
  * 占用bitmap中连续的磁盘块[start,end)
- * 
- */ 
+ *
+ */
 static baby_fsblk_t do_allocate(struct buffer_head *bh, unsigned long *count,
-                                unsigned int start, unsigned int end, 
-                                int goal, unsigned short is_next) {
-unsigned long num = 0;
+                                unsigned int start, unsigned int end, int goal,
+                                unsigned short is_next) {
+  unsigned long num = 0;
 
 repeat:
   if (goal < 0) {
@@ -417,11 +420,12 @@ repeat:
       goto fail;
     }
   }
-  // printk("do_allocate *count %lu start %u end %u goal %lld is_next %d\n", *count, start, end, goal, is_next);
+  // printk("do_allocate *count %lu start %u end %u goal %lld is_next %d\n",
+  // *count, start, end, goal, is_next);
 
   start = goal;
   // 返回1，说明占用失败，start位原先就是1，看下一位是不是空闲位
-  if (baby_set_bit(start, bh->b_data)) { 
+  if (baby_set_bit(start, bh->b_data)) {
     start++;
     goal++;
     if (start >= end || is_next) {
@@ -429,7 +433,7 @@ repeat:
     }
     goto repeat;
   }
-  num++; // 已经占用一块了
+  num++;  // 已经占用一块了
   goal++; // 从已经占用的下一块开始
 
   // 继续占用 goal 之后的位，直到到达边界或满足需求
@@ -442,7 +446,7 @@ repeat:
   mark_buffer_dirty(bh);
   brelse(bh);
   return goal - num;
-  
+
 fail:
   *count = num;
   brelse(bh);
@@ -461,9 +465,11 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
   int start, end, first;
   unsigned long num = *count, remain;
   unsigned short has_next = 0;
-  int bitmap_offset = goal % BABYFS_BIT_PRE_BLOCK,
-      bitmap_no = goal / BABYFS_BIT_PRE_BLOCK, 
-      bitmap_no_1, bitmap_no_2, ret_bitmap_no;
+  int bitmap_offset = 0, bitmap_no = 0, bitmap_no_1, bitmap_no_2, ret_bitmap_no;
+  if (goal > 0) {
+    bitmap_offset = goal % BABYFS_BIT_PRE_BLOCK;
+    bitmap_no = goal / BABYFS_BIT_PRE_BLOCK, bitmap_no_1, bitmap_no_2;
+  }
 
   printk("baby_try_to_allocate goal %lld count %lu\n", goal, *count);
   if (my_rsv) {
@@ -485,27 +491,31 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
         brelse(bh[0]);
         ret_bitmap_no = bitmap_no_2;
         has_next = 0; // 在第二块的 [bitmap_offset,rsv_end]查找
-      } else if (bitmap_no_1 != bitmap_no_2) // goal 在第一块bitmap上，查找到第一块的末尾
+      } else if (bitmap_no_1 !=
+                 bitmap_no_2) // goal 在第一块bitmap上，查找到第一块的末尾
         end = BABYFS_BIT_PRE_BLOCK; // 在第一块的 [bitmap_offset,bitmap_end]
     } else // goal 不在预留窗口内，在分配前需要先找一个起始点
       goal = -1;
   } else { // 不存在预留窗口，在goal所在bitmap内分配
-    if(bitmap_offset > 0)
+    if (bitmap_offset > 0)
       start = bitmap_offset;
     else
       start = 0;
     end = BABYFS_BIT_PRE_BLOCK;
-    
+
     ret_bitmap_no = bitmap_no;
     bh[0] = sb_bread(sb, bitmap_no + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
-    if(!bh[0])
+    if (!bh[0])
       goto fail;
   }
-  printk("baby_try_to_allocate num %d start %u end %u goal %lld\n", num, start, end, goal);
+  printk("baby_try_to_allocate num %d start %u end %u goal %lld\n", num, start,
+         end, goal);
 
   // 在第一个bitmap中分配
-  first = do_allocate(bh[0], &num, start, end, goal, 0);
-  printk("baby_try_to_allocate first %d num %d start %u end %u goal %lld\n", first, num, start, end, goal);
+  first = do_allocate(bh[0], &num, start, end,
+                      goal % BABYFS_DATA_BIT_MAP_BLOCK_BASE, 0);
+  printk("baby_try_to_allocate first %d num %d start %u end %u goal %lld\n",
+         first, num, start, end, goal);
 
   if (first < 0) {
     if (!has_next) {
@@ -525,7 +535,8 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
 
 success:
   *count = num;
-  printk("baby_try_to_allocate return %llu count %lu\n", first + BABYFS_BIT_PRE_BLOCK * ret_bitmap_no, *count);
+  printk("baby_try_to_allocate return %llu count %lu\n",
+         first + BABYFS_BIT_PRE_BLOCK * ret_bitmap_no, *count);
   return first + BABYFS_BIT_PRE_BLOCK * ret_bitmap_no;
 
 fail:
@@ -559,7 +570,7 @@ baby_try_to_allocate_with_rsv(struct super_block *sb, baby_fsblk_t goal,
     printk("baby_try_to_allocate_with_rsv not use rsv\n");
     return baby_try_to_allocate(sb, goal, count, NULL, bh_array);
   }
-    
+
   printk("baby_try_to_allocate_with_rsv use rsv\n");
   dump_myrsv(my_rsv);
 
@@ -658,8 +669,7 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
   }
   // 检查 goal 是否超出
   struct baby_super_block *b_sb = sb_info->s_babysb;
-  if (goal < NR_DSTORE_BLOCKS ||
-      goal > NR_DSTORE_BLOCKS + b_sb->nr_blocks - 1)
+  if (goal < NR_DSTORE_BLOCKS || goal > NR_DSTORE_BLOCKS + b_sb->nr_blocks - 1)
     goal = NR_DSTORE_BLOCKS;
 
   goal -= NR_DSTORE_BLOCKS;
@@ -681,7 +691,8 @@ retry_alloc:
 
   // 尝试分配
   ret_block = baby_try_to_allocate_with_rsv(sb, goal, my_rsv, &num);
-  printk("baby_new_blocks: ret_block %lld goal %lu num %lu\n", ret_block, goal, num);
+  printk("baby_new_blocks: ret_block %lld goal %lu num %lu\n", ret_block, goal,
+         num);
   if (ret_block >= 0)
     goto allocated;
 
