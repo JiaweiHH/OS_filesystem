@@ -27,7 +27,8 @@ ssdumt:
 	sudo umount /mnt/ssd-ext2 && sudo rmdir /mnt/ssd-ext2 \
 	&& sudo umount /mnt/ssd-ext4 && sudo rmdir /mnt/ssd-ext4 \
 	&& sudo umount /mnt/ssd-f2fs && sudo rmdir /mnt/ssd-f2fs
-
+random_create_file:
+	g++ -Wall -std=c++11 -pthraed ./rw_test/test -o test
 
 # datablock_total - bitmap_num	<= bitmap_num * (blocksize << 3) 
 # (bitmap_num - 1) * (blocksize << 3) <= datablock_total - bitmap_num
