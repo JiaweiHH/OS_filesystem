@@ -926,6 +926,8 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
                       unsigned long count) {
   struct buffer_head *bitmap_bh = NULL; // 用来读取 bitmap 块
   struct super_block *sb = inode->i_sb;
+  struct baby_sb_info *bbi = BABY_SB(sb);
+  unsigned long nr_need_free = count;
   unsigned long i, bitmap_no, nr_del_bit, clear_bit_no;
 
   // 待释放 block 对应 bit 所在位图的物理磁盘块号
@@ -962,6 +964,7 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
     nr_del_bit =
         min(count, BABYFS_BIT_PRE_BLOCK); // 下一个位图中，要清除的bit个数
   }
+  bbi->nr_free_blocks += nr_need_free; // 维护系统中剩余的可用数据块个数
 }
 
 /*
