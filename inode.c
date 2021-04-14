@@ -467,7 +467,6 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
     goto clean_up;
   // 收尾工作，此时的 count 表示直接块的数量
   baby_splice_branch(inode, block, partial, indirect_blk, count);
-  sb_info->nr_free_blocks -= count + indirect_blk;
 
 got_it:
   map_bh(bh, inode->i_sb, le32_to_cpu(chain[depth - 1].key));
@@ -987,7 +986,6 @@ static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
       else {
         baby_free_blocks(inode, block_to_free, count);
         mark_inode_dirty(inode);
-        sb_info->nr_free_blocks += count;
       free_this:
         block_to_free = nr;
         count = 1;
@@ -996,7 +994,6 @@ static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
   }
   if (count > 0) {
     baby_free_blocks(inode, block_to_free, count);
-    sb_info->nr_free_blocks += count;
     mark_inode_dirty(inode);
   }
 }
@@ -1033,7 +1030,6 @@ static void baby_free_branches(struct inode *inode, __le32 *p, __le32 *q,
       // 抛弃bh的所有待同步信息，并释放bh，因为释放数据不再需要关心数据同步
       bforget(bh);
       baby_free_blocks(inode, nr, 1); // 释放该索引项指示的下一级索引磁盘块
-      sb_info->nr_free_blocks += 1;
       mark_inode_dirty(inode);
     }
   } else {
