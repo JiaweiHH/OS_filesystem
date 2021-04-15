@@ -157,7 +157,9 @@ static Indirect *baby_get_branch(struct inode *inode, int depth, int *offsets,
   *err = 0;
   // 先把最大的那个索引数据填充进去
   add_chain(chain, NULL, BABY_I(inode)->i_blocks + *offsets);
+#ifdef DEBUG
   printk("p->key: %ld\n", p->key);
+#endif
   if (!p->key)
     goto no_block;
   // offset 从上到下保存了每一级索引的地址，只需要按顺序读取就可以了
@@ -452,7 +454,9 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
   int depth = baby_block_to_path(inode, block, offset, &blocks_to_boundary);
   if (!depth)
     return err;
+#ifdef DEBUG
   printk("baby_get_blocks: block %ld depth %ld\n", block, depth);
+#endif
   // 读取索引信息，返回 NULL 表示找到了所有的。partial 不为 NULL 说明 partial
   // 的下一级没有分配数据块
   partial = baby_get_branch(inode, depth, offset, chain, &err);
@@ -468,7 +472,6 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
    * 0，就让它等于数据块起始位置，这样可以避免在分配的时候 if-else 判断 */
   unsigned long temp = baby_find_goal(inode, block, partial);
   if (!temp) {
-    printk("temp is 0!!!!\n");
     temp = NR_DSTORE_BLOCKS;
   }
   unsigned long goal =
@@ -500,7 +503,9 @@ clean_up:
 int baby_get_block(struct inode *inode, sector_t block, struct buffer_head *bh,
                    int create) {
   unsigned maxblocks = bh->b_size / inode->i_sb->s_blocksize;
+#ifdef DEBUG
   printk("baby_get_block: ino %ld block %ld\n", inode->i_ino, block);
+#endif
   int ret = baby_get_blocks(inode, block, maxblocks, bh, create);
   return ret;
 }

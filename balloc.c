@@ -281,7 +281,9 @@ static int alloc_new_reservation(struct baby_reserve_window_node *my_rsv,
       if (size > BABY_MAX_RESERVE_BLOCKS)
         size = BABY_MAX_RESERVE_BLOCKS;
       my_rsv->rsv_goal_size = size;
+    #ifdef DEBUG
       printk("alloc_new_reservation: extend rsv size to %u\n", size);
+    #endif
     }
   }
 
@@ -330,8 +332,10 @@ retry:
   bitmap_no_2 = my_rsv->rsv_end / BABYFS_BIT_PRE_BLOCK;
   if (bitmap_no_1 != bitmap_no_2) {
     bh[1] = sb_bread(sb, bitmap_no_2 + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
-    printk("alloc_new_reservation: read bitmap_2 block NO.%d\n",
-           bitmap_no_2 + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
+    #ifdef DEBUG
+      printk("alloc_new_reservation: read bitmap_2 block NO.%d\n",
+            bitmap_no_2 + BABYFS_DATA_BIT_MAP_BLOCK_BASE);
+    #endif
   }
 
   // 找到 bitmap 中的第一个 free_block
@@ -455,7 +459,9 @@ repeat:
   if (baby_set_bit(start, bh->b_data)) {
     start++;
     goal++;
+  #ifdef DEBUG
     printk("baby_set_bit failed: set bit %ld\n", goal - 1);
+  #endif
     if (start >= end || is_next) {
       goto fail;
     }
@@ -607,11 +613,14 @@ baby_try_to_allocate_with_rsv(struct super_block *sb, baby_fsblk_t goal,
   printk("baby_try_to_allocate_with_rsv goal %lld count %lu\n", goal, *count);
 #endif
   if (my_rsv == NULL) { // (非普通文件)不使用预留窗口分配数据块
+  #ifdef DEBUG
     printk("baby_try_to_allocate_with_rsv not use rsv\n");
+  #endif
     return baby_try_to_allocate(sb, goal, count, NULL, bh_array);
   }
-
+#ifdef DEBUG
   printk("baby_try_to_allocate_with_rsv use rsv\n");
+#endif
 #ifdef DEBUG
   dump_myrsv(my_rsv);
 #endif
@@ -699,8 +708,10 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
   struct baby_reserve_window_node *my_rsv = NULL;
   unsigned long free_blocks;
   baby_fsblk_t ret_block;
+#ifdef DEBUG
   printk("-----------------------------\n");
   printk("baby_new_blocks: physical goal %lu\n", goal);
+#endif
   struct baby_block_alloc_info *block_i = inode_info->i_block_alloc_info;
   if (block_i) {
     my_rsv = &block_i->rsv_window_node;
@@ -717,7 +728,9 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
     goal = NR_DSTORE_BLOCKS;
 
   goal -= NR_DSTORE_BLOCKS;
+#ifdef DEBUG
   printk("baby_new_blocks: logical goal %lu\n", goal);
+#endif
   // bitmap 数量
   unsigned long num = *count;
   unsigned int windowsz = my_rsv->rsv_goal_size; // 窗口大小
@@ -740,8 +753,10 @@ retry_alloc:
 
   // 尝试分配
   ret_block = baby_try_to_allocate_with_rsv(sb, goal, my_rsv, &num);
+#ifdef DEBUG
   printk("baby_new_blocks: ret_block %lld goal %lu num %lu\n", ret_block, goal,
          num);
+#endif
   if (ret_block >= 0)
     goto allocated;
 
@@ -755,9 +770,11 @@ retry_alloc:
   goto out;
 
 allocated:
+#ifdef DEBUG
   printk("-----------------------------\n");
+#endif
 
-  // sb_info->nr_free_blocks -= num;
+  sb_info->nr_free_blocks -= num;
   *err = 0;
   if (num < *count) {
     *count = num;
@@ -766,7 +783,9 @@ allocated:
   return ret_block + NR_DSTORE_BLOCKS;
 
 out:
+#ifdef DEBUG
   printk("-----------------------------\n");
+#endif
 
   return 0;
 }

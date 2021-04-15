@@ -2,6 +2,7 @@ ifneq ($(KERNELRELEASE),)
 obj-m := babyfs.o
 babyfs-objs := inode.o super.o dir.o file.o balloc.o
 # CFLAGS_balloc.o += -DDEBUG
+# CFLAGS_inode.o += -DDEBUG
 else
 KDIR:=/lib/modules/$(shell uname -r)/build
 all:
@@ -15,7 +16,7 @@ install:
 uninstall:
 	sudo rmmod babyfs
 mkimg:
-	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1K count=40 && ./mkfs.babyfs ./test.img
+	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1M count=50 && ./mkfs.babyfs ./test.img
 mount:
 	mkdir test && sudo mount -t babyfs -o loop ./test.img ./test
 umount:
