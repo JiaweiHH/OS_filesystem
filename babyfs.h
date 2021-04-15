@@ -28,7 +28,7 @@
 #define BABYFS_INODE_SIZE 128         // 一个 inode 结构体的大小
 #define BABYFS_ROOT_INODE_NO 0        // 根目录的 inode 编号
 #define BABYFS_SUPER_BLOCK 0          // 超级块的块号
-#define BABYFS_INODE_BLOCKS_NUM 1024  // inode 占用块数
+#define BABYFS_INODE_BLOCKS_NUM 1  // inode 占用块数
 #define BABYFS_INODE_BIT_MAP_BLOCK_BASE \
   (BABYFS_SUPER_BLOCK + 1)  // inode 位图起始块号
 #define BABYFS_INODE_NUM_PER_BLOCK \
@@ -39,7 +39,7 @@
   (BABYFS_BLOCK_SIZE << 3)  // 每个 block 可以存放的位数
 #define BABYFS_INODE_TABLE_BLOCK_BASE \
   (BABYFS_INODE_BIT_MAP_BLOCK_BASE +  \
-   BABYFS_INODE_NUM_COUNTS / BABYFS_BIT_PRE_BLOCK)  // inode 表起始块号
+   (BABYFS_INODE_NUM_COUNTS + BABYFS_BIT_PRE_BLOCK - 1) / BABYFS_BIT_PRE_BLOCK)  // inode 表起始块号
 #define BABYFS_DATA_BIT_MAP_BLOCK_BASE \
   (BABYFS_INODE_TABLE_BLOCK_BASE + BABYFS_INODE_BLOCKS_NUM)  // 数据位图起始块号
 
