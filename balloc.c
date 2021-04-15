@@ -521,7 +521,7 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
 
   // 在第一个bitmap中分配
   first = do_allocate(bh[0], &num, start, end,
-                      goal % BABYFS_DATA_BIT_MAP_BLOCK_BASE, 0);
+                      goal % BABYFS_BIT_PRE_BLOCK, 0);
   printk("baby_try_to_allocate: first %d, get %d, [%u, %u) goal %lld\n",
          first, num, start, end, goal);
 
