@@ -733,7 +733,9 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
 #endif
   // bitmap 数量
   unsigned long num = *count;
-  unsigned int windowsz = my_rsv->rsv_goal_size; // 窗口大小
+  unsigned int windowsz = 0; // 窗口大小
+  if(my_rsv)  // 需要判断，否则会在目录文件为 null 的时候使用 my_rsv
+    windowsz = my_rsv->rsv_goal_size;
   free_blocks = sb_info->nr_free_blocks;         // 系统剩余空闲数量
   
 #ifdef DEBUG

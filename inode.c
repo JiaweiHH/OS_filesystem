@@ -431,8 +431,10 @@ static void baby_splice_branch(struct inode *inode, unsigned long block,
   
   struct baby_inode_info *inode_info = BABY_I(inode);
   struct baby_block_alloc_info *block_i = inode_info->i_block_alloc_info;
-  block_i->last_alloc_logical_block = block + blks - 1;
-  block_i->last_alloc_physical_block = le32_to_cpu(partial[num].key) + blks - 1;
+  if(block_i) {
+    block_i->last_alloc_logical_block = block + blks - 1;
+    block_i->last_alloc_physical_block = le32_to_cpu(partial[num].key) + blks - 1;
+  }
   if (partial->bh)
     mark_buffer_dirty_inode(partial->bh, inode);
   inode->i_ctime = current_time(inode);
