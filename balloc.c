@@ -180,25 +180,62 @@ find_next_reservable_window(struct baby_reserve_window_node *search_head,
   unsigned short size = my_rsv->rsv_goal_size;
   unsigned long cur = start_block;
   struct baby_reserve_window_node *rsv = search_head, *prev = NULL;
-
+  struct baby_sb_info *sb_info = BABY_SB(sb);
+  struct rb_root *rsv_root = &sb_info->s_rsv_window_root;
+  struct rb_node *n = rsv_root->rb_node;
+#ifdef DEBUG
+  printk("find_next_reservable_window: start_block %ld end_block %ld\n", start_block, end_block);
+#endif
+  if(!rsv)
+    return -1;
   while (1) {
     // 从当前 rsv 之外开始找
     if (cur <= rsv->rsv_end)
       cur = rsv->rsv_end + 1;
     if (cur > end_block)
-      return -1;
+      goto try_prev;
+      // return -1;
 
     prev = rsv;
     next = rb_next(&rsv->rsv_node);
     rsv = rb_entry(next, struct baby_reserve_window_node, rsv_node);
-    if (!next)
-      break;
+    if (!next) {
+      if(cur + size <= end_block)
+        goto find;
+      goto try_prev;
+      // break;
+    }
+      
 
     // 找到了一个足够容纳 size 大小的空间
     if (cur + size <= rsv->rsv_start)
-      break;
+      goto find;
   }
 
+try_prev:
+  // 从 [0, 0] 开始找
+#ifdef DEBUG
+  printk("find_next_reservable_window: try_prev\n");
+#endif
+  rsv = rb_entry(n, struct baby_reserve_window_node, rsv_node);
+  cur = 1;  // 跳过第 0 块
+
+  if(rsv == search_head)  // 第一个预留窗口
+    goto find;
+
+  while(rsv != search_head) {
+    if(cur <= rsv->rsv_end)
+      cur = rsv->rsv_end + 1;
+    printk("cur: %ul rsv.start: %ul rsv.end: %ul\n", cur, rsv->rsv_start, rsv->rsv_end);
+    prev = rsv;
+    next = rb_next(&rsv->rsv_node);
+    rsv = rb_entry(next, struct baby_reserve_window_node, rsv_node);
+    if(cur + size <= rsv->rsv_start)
+      goto find;
+  }
+  return -1;
+
+find:
   // 下列条件成立，说明这次找到的和上一次使用的预留窗口不是相邻的关系
   // 是相邻的关系可以直接更改 my_rsv 的字段值
   // 不是相邻的关系需要先移除红黑树，因为直接修改会导致红黑树 不“有序”
