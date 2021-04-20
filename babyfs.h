@@ -78,21 +78,24 @@ struct baby_super_block {
   __le32 last_bitmap_bits; /* 最后一块block bitmap含有的有效bit位数 */
 };
 
-// 磁盘索引节点
+/* 
+ * 磁盘索引节点
+ * 字节对齐：1. 结构体的大小等于其最大成员的整数倍 2.结构体成员的首地址相对于结构体首地址的偏移量是其类型大小的整数倍
+ * 将大的数据放在前面可以避免字节对齐填充问题
+ */
 struct baby_inode {
-  __le16 i_mode;                    /* 文件类型和访问权限 */
-  __le16 i_uid;                     /* inode 所属用户编号 */
-  __le16 i_gid;                     /* inode 所属用户组编号 */
   __le64 i_size;                    /* inode 对应文件大小 */
   __le32 i_ctime;                   /* i_ctime */
   __le32 i_atime;                   /* i_atime */
   __le32 i_mtime;                   /* i_mtime */
   __le32 i_blocknum;                /* 文件块数 */
+  __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
+  __le16 i_mode;                    /* 文件类型和访问权限 */
+  __le16 i_uid;                     /* inode 所属用户编号 */
+  __le16 i_gid;                     /* inode 所属用户组编号 */
   __le16 i_nlink;                   /* 硬链接计数 */
   __le16 i_subdir_num;              /* 子目录项数量 */
-  __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
-  __u8 _padding[(BABYFS_INODE_SIZE -
-                 (4 + 2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
+  __u8 _padding[(BABYFS_INODE_SIZE - (4 + 2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
 };
 
 /*

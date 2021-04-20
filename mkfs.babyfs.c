@@ -61,6 +61,7 @@ static void write_superblock(u_int64_t file_size) {
   printf("bitmap_start = %ld, datablock_start = %ld, total free blocks = %ld\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE, super_block->nr_dstore_blocks, super_block->nr_free_blocks);
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("超级块写入出错!\n");
     return;
   }
@@ -86,6 +87,7 @@ static void write_inode_table() {
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   // count++;
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("inode_table: 0, 写出错!\n");
     return;
   }
@@ -95,6 +97,7 @@ static void write_inode_table() {
   for (int i = 1; i < BABYFS_INODE_BLOCKS_NUM; ++i) {
     // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+      free(block);
       fprintf(stderr, "inode_table: %d, 写出错!\n", i);
       return;
     }
@@ -128,6 +131,7 @@ static void write_inode_bitmap() {
     ret = write(fd, inode_bitmap,
                 BABYFS_BLOCK_SIZE);  // 文件指针每次写完会自动往下一个块大小
     if (ret != BABYFS_BLOCK_SIZE) {
+      free(block);
       fprintf(stderr, "inode_bitmap: %d 写出错\n", i);
       return;
     }
@@ -148,6 +152,7 @@ static void write_datablock_bitmap() {
   // count++;
   // printf("write_datablock_bitmap: %d\n", count);
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("data_block_bitmap: 0, 写出错!\n");
     return;
   }
@@ -157,6 +162,7 @@ static void write_datablock_bitmap() {
   for (int i = 1; i < nr_dstore_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE; ++i) {
     // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+      free(block);
       fprintf(stderr, "data_block_bitmap: %d, 写出错!\n", i);
       return;
     }
@@ -191,6 +197,7 @@ static void write_first_datablock() {
   // 写入目录项
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror(". 目录项写入出错!\n");
     return;
   }
@@ -200,6 +207,7 @@ static void write_first_datablock() {
         SEEK_SET);  // 从头开始移动偏移量
   char *inode_block = malloc(BABYFS_BLOCK_SIZE);
   if (ret = read(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("读取 inode 数据出错!\n");
     return;
   }
@@ -210,6 +218,7 @@ static void write_first_datablock() {
   // 写入数据
   lseek(fd, BABYFS_INODE_TABLE_BLOCK_BASE * BABYFS_BLOCK_SIZE, SEEK_SET);
   if (ret = write(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("写入 inode 数据出错!\n");
     return;
   }

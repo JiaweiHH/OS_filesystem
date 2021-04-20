@@ -1,8 +1,8 @@
 ifneq ($(KERNELRELEASE),)
 obj-m := babyfs.o
 babyfs-objs := inode.o super.o dir.o file.o balloc.o
-# CFLAGS_balloc.o += -DDEBUG
-# CFLAGS_inode.o += -DDEBUG
+# CFLAGS_balloc.o += -DRSV_DEBUG
+# CFLAGS_inode.o += -DRSV_DEBUG
 else
 KDIR:=/lib/modules/$(shell uname -r)/build
 all:

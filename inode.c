@@ -157,9 +157,6 @@ static Indirect *baby_get_branch(struct inode *inode, int depth, int *offsets,
   *err = 0;
   // 先把最大的那个索引数据填充进去
   add_chain(chain, NULL, BABY_I(inode)->i_blocks + *offsets);
-#ifdef DEBUG
-  printk("p->key: %ld\n", p->key);
-#endif
   if (!p->key)
     goto no_block;
   // offset 从上到下保存了每一级索引的地址，只需要按顺序读取就可以了
@@ -234,17 +231,11 @@ static unsigned long baby_find_near(struct inode *inode, Indirect *ind) {
    */
   for (p = ind->p - 1; p >= start; --p) {
     if (*p) {
-    #ifdef DEBUG
-      printk("le32_to_cpu(*p): %ld\n", le32_to_cpu(*p));
-    #endif
       return le32_to_cpu(*p);
     }
   }
   // 没有找到，就找当前的间接块
   if (ind->bh) {
-  #ifdef DEBUG
-    printk("ind->bh->b_blocknr: %ld\n", ind->bh->b_blocknr);
-  #endif
     return ind->bh->b_blocknr;
   }
   // 再没有的话就随机返回一块
@@ -253,7 +244,7 @@ static unsigned long baby_find_near(struct inode *inode, Indirect *ind) {
   unsigned short bitmap_num = sb_info->nr_bitmap;
   baby_fsblk_t first_block = NR_DSTORE_BLOCKS;
   baby_fsblk_t colour = (current->pid % (16 * bitmap_num)) * (sb_info->nr_blocks / (16 * bitmap_num));
-#ifdef DEBUG
+#ifdef RSV_DEBUG
   printk("first_block + colour: %ld\n", first_block + colour);
 #endif
   return first_block + colour;
@@ -273,9 +264,6 @@ static inline int baby_find_goal(struct inode *inode, sector_t block,
   // 表示下一次可以分配的物理块号
   if (block_i && (block == block_i->last_alloc_logical_block + 1) &&
       (block_i->last_alloc_physical_block != 0)) {
-  #ifdef DEBUG
-    printk("block_i->last_alloc_physical_block + 1: %ld\n", block_i->last_alloc_physical_block + 1);
-  #endif
     return block_i->last_alloc_physical_block + 1;
   }
   // 说明没有指定下一次要分配的物理块，此时从 partial 附近就近找一个块号
@@ -461,9 +449,6 @@ static int baby_get_blocks(struct inode *inode, sector_t block,
   int depth = baby_block_to_path(inode, block, offset, &blocks_to_boundary);
   if (!depth)
     return err;
-#ifdef DEBUG
-  printk("baby_get_blocks: block %ld depth %ld\n", block, depth);
-#endif
   // 读取索引信息，返回 NULL 表示找到了所有的。partial 不为 NULL 说明 partial
   // 的下一级没有分配数据块
   partial = baby_get_branch(inode, depth, offset, chain, &err);
@@ -510,7 +495,7 @@ clean_up:
 int baby_get_block(struct inode *inode, sector_t block, struct buffer_head *bh,
                    int create) {
   unsigned maxblocks = bh->b_size / inode->i_sb->s_blocksize;
-#ifdef DEBUG
+#ifdef RSV_DEBUG
   printk("baby_get_block: ino %ld block %ld\n", inode->i_ino, block);
 #endif
   int ret = baby_get_blocks(inode, block, maxblocks, bh, create);
