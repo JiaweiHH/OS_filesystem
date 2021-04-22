@@ -223,12 +223,13 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
 // 小端序位图操作方法
 // baby_find_next_zero_bit(void *map, unsigned long search_maxnum, unsigned long search_start)
 #define baby_set_bit __test_and_set_bit_le      // set 1，并返回原值
-#define baby_clear_bit __clear_bit_le  // set 0
 #define baby_test_bit test_bit_le
+#define baby_clear_bit	__test_and_clear_bit_le
 #define baby_find_first_zero_bit find_first_zero_bit_le
 #define baby_find_first_bit find_first_bit
 #define baby_find_next_zero_bit find_next_zero_bit_le
 #define baby_find_next_bit find_next_bit
+#define baby_test_bit test_bit_le
 #endif
 
 #endif

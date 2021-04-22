@@ -248,6 +248,7 @@ static unsigned long baby_find_near(struct inode *inode, Indirect *ind) {
   printk("first_block + colour: %ld\n", first_block + colour);
 #endif
   return first_block + colour;
+  // return NR_DSTORE_BLOCKS + 1;
 }
 
 /*
@@ -944,31 +945,28 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
   unsigned long i, bitmap_no, nr_del_bit, clear_bit_no;
 
   // 待释放 block 对应 bit 所在位图的物理磁盘块号
-  bitmap_no = block / BABYFS_BIT_PRE_BLOCK + BABYFS_DATA_BIT_MAP_BLOCK_BASE;
+  bitmap_no = (block - NR_DSTORE_BLOCKS) / BABYFS_BIT_PRE_BLOCK + BABYFS_DATA_BIT_MAP_BLOCK_BASE;
   // 待释放 block 对应 bit 在其位图磁盘块中的偏移
   // data_bitmap记录磁盘块距离第一个数据块的距离，所以block要减去第一个数据块的偏移
   clear_bit_no = (block - NR_DSTORE_BLOCKS) % BABYFS_BIT_PRE_BLOCK;
   // 在一个位图中，待清除的bit个数，第一个块的起始位不为0
   nr_del_bit = min(count, BABYFS_BIT_PRE_BLOCK - clear_bit_no);
 
-  // printk("block: %ld, bitmap_no: %ld, clear_bit_no: %ld, nr_del_bit: %d\n",
-  //        block, bitmap_no, clear_bit_no, nr_del_bit);
-
   while (count > 0) { // 操作bitmap_no指示的位图
     bitmap_bh = sb_bread(sb, bitmap_no);
-    int i_no =
-        baby_find_first_zero_bit(bitmap_bh->b_data, BABYFS_BIT_PRE_BLOCK);
-    // printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
-    for (i = 0; i < nr_del_bit;
-         i++) { // 清空bitmap_no位图块内指定的bit，[clear_bit_no,
-                // clear_bit_no+nr)
-      baby_clear_bit(clear_bit_no + i,
-                     bitmap_bh->b_data); // 清除该 bitmap 中的相对位置的 bit
+    
+    // 清空bitmap_no位图块内指定的bit，[clear_bit_no, clear_bit_no+nr)
+    for (i = 0; i < nr_del_bit; i++) { 
+      // 清除该 bitmap 中的相对位置的 bit
+      if(!baby_clear_bit(clear_bit_no + i, (unsigned long *)bitmap_bh->b_data)) {
+        printk(KERN_ERR "clear bitmap no %ld on bit %ld err\n", bitmap_no, clear_bit_no + i);
+      }
     }
-    i_no = baby_find_first_zero_bit(bitmap_bh->b_data, BABYFS_BIT_PRE_BLOCK);
-    // printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
-
+  #ifdef CLEAR_DEBUG
+    printk("baby_free_blocks：bitmap_no %ld clear bit [%ld, %ld]\n", bitmap_no, clear_bit_no, clear_bit_no + nr_del_bit - 1);
+  #endif
     mark_buffer_dirty(bitmap_bh);
+    // sync_dirty_buffer(bitmap_bh);
     brelse(bitmap_bh);
 
     count -= nr_del_bit; // 还剩多少bit要清除
@@ -1125,7 +1123,7 @@ void baby_free_inode(struct inode *inode) {
 
   // TODO 当前 inode 分配位图只占了一个磁盘块，要支持多块的话这里要改成循环
   bitmap_bh = sb_bread(inode->i_sb, BABYFS_INODE_BIT_MAP_BLOCK_BASE);
-  baby_clear_bit(inode->i_ino, bitmap_bh->b_data);
+  baby_clear_bit(inode->i_ino, (unsigned long *)bitmap_bh->b_data);
   mark_buffer_dirty(bitmap_bh);
   brelse(bitmap_bh);
 }
