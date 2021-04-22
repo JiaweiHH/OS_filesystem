@@ -37,13 +37,13 @@ static void write_superblock(u_int64_t file_size) {
   super_block->nr_inodes = BABYFS_INODE_BLOCKS_NUM;  // inode 块数
   super_block->nr_istore_blocks =
       BABYFS_INODE_TABLE_BLOCK_BASE;  // inode 表起始块号
-  printf("inode table start: %ld\n", super_block->nr_istore_blocks);
+  printf("inode table start: %d\n", super_block->nr_istore_blocks);
   super_block->nr_ifree_blocks =
       BABYFS_INODE_BIT_MAP_BLOCK_BASE;  // inode 位图起始块号
-  printf("inode bitmap start: %ld\n", super_block->nr_ifree_blocks);
+  printf("inode bitmap start: %d\n", super_block->nr_ifree_blocks);
   super_block->nr_bfree_blocks =
       BABYFS_DATA_BIT_MAP_BLOCK_BASE;  // 数据块位图起始块号
-  printf("data bitmap start: %ld\n", super_block->nr_bfree_blocks);
+  printf("data bitmap start: %d\n", super_block->nr_bfree_blocks);
   super_block->nr_dstore_blocks =
       (total_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE + BABYFS_BIT_PRE_BLOCK - 1) /
           (BABYFS_BLOCK_SIZE << 3) +
@@ -58,7 +58,7 @@ static void write_superblock(u_int64_t file_size) {
   super_block->nr_free_blocks =
       super_block->nr_blocks;  // data block 剩余空闲数量
   super_block->nr_free_blocks--;  // 根目录的数据
-  printf("bitmap_start = %ld, datablock_start = %ld, total free blocks = %ld\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE, super_block->nr_dstore_blocks, super_block->nr_free_blocks);
+  printf("bitmap_start = %d, datablock_start = %d, total free blocks = %d\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE, super_block->nr_dstore_blocks, super_block->nr_free_blocks);
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   if (ret != BABYFS_BLOCK_SIZE) {
     free(block);
