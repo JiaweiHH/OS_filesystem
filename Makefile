@@ -16,15 +16,17 @@ install:
 uninstall:
 	sudo rmmod babyfs
 mkimg:
-	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=test.img bs=1M count=50 && ./mkfs.babyfs ./test.img
+	gcc -o mkfs.babyfs mkfs.babyfs.c && dd if=/dev/zero of=fs.img bs=1M count=50 && ./mkfs.babyfs ./fs.img
 mount:
-	mkdir test && sudo mount -t babyfs -o loop ./test.img ./test
+	mkdir imgdir && sudo mount -t babyfs -o loop ./fs.img ./imgdir
 umount:
-	sudo umount ./test && rmdir test
+	sudo umount ./imgdir && rmdir imgdir
 ssd:
 	sudo mount -t babyfs /dev/sda1 ~/Desktop/ssd-baby/
 ssdumt:
 	sudo umount ~/Desktop/ssd-baby
+runtest:
+	cd ./test && sudo bash runtest
 
 
 # datablock_total - bitmap_num	<= bitmap_num * (blocksize << 3) 
