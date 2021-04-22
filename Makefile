@@ -26,7 +26,7 @@ ssd:
 ssdumt:
 	sudo umount ~/Desktop/ssd-baby
 runtest:
-	cd ./test && sudo bash runtest
+	cd ./test && sudo bash runtest.sh
 
 
 # datablock_total - bitmap_num	<= bitmap_num * (blocksize << 3) 
