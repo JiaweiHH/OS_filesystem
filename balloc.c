@@ -472,9 +472,9 @@ static void try_to_extend_reservation(struct baby_reserve_window_node *my_rsv,
  * 占用bitmap中连续的磁盘块[start,end)
  *
  */
-static baby_fsblk_t do_allocate(struct buffer_head *bh, unsigned long *count,
-                                unsigned int start, unsigned int end, int goal,
-                                unsigned short is_next) {
+static baby_fsblk_t do_allocate(struct super_block *sb, struct buffer_head *bh, 
+                                unsigned long *count, unsigned int start,
+                                unsigned int end, int goal, unsigned short is_next) {
   unsigned long num = 0;
 #ifdef RSV_DEBUG
   printk("do_allocate begin: start %ld, goal %ld\n", start, goal);
@@ -519,6 +519,8 @@ repeat:
 
   *count = num;
   mark_buffer_dirty(bh);
+  if (sb->s_flags & SB_SYNCHRONOUS)
+    sync_dirty_buffer(bh);
   brelse(bh);
   return goal - num;
 
@@ -543,7 +545,7 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
   int bitmap_offset = 0, bitmap_no = 0, bitmap_no_1, bitmap_no_2, ret_bitmap_no;
   if (goal > 0) {
     bitmap_offset = goal % BABYFS_BIT_PRE_BLOCK;
-    bitmap_no = goal / BABYFS_BIT_PRE_BLOCK, bitmap_no_1, bitmap_no_2;
+    bitmap_no = goal / BABYFS_BIT_PRE_BLOCK;
   }
 #ifdef RSV_DEBUG
   printk("baby_try_to_allocate goal %lld count %lu\n", goal, *count);
@@ -593,7 +595,7 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
           end, goal);
   #endif
   // 在第一个bitmap中分配
-  first = do_allocate(bh[0], &num, start, end,
+  first = do_allocate(sb, bh[0], &num, start, end,
                       goal % BABYFS_BIT_PRE_BLOCK, 0);
 #ifdef RSV_DEBUG
   printk("baby_try_to_allocate: first %d, get %d, [%u, %u) goal %lld\n",
@@ -615,7 +617,7 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
 #ifdef RSV_DEBUG
   printk("baby_try_to_allocate next, remain %lu\n", remain);
 #endif
-  do_allocate(bh[1], &remain, 0, my_rsv->_rsv_end % BABYFS_BIT_PRE_BLOCK + 1, 0, 1);
+  do_allocate(sb, bh[1], &remain, 0, my_rsv->_rsv_end % BABYFS_BIT_PRE_BLOCK + 1, 0, 1);
   num += remain;
 
 success:

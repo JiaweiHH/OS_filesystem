@@ -9,6 +9,7 @@
 
 unsigned long NR_DSTORE_BLOCKS;
 struct super_operations babyfs_super_opts;
+void baby_sync_super(struct baby_sb_info *sb_info, struct baby_super_block *raw_sb, int wait);
 
 /**
  * 计算文件系统支持的最大文件大小，最大文件大小受两方面的限制：
@@ -197,6 +198,8 @@ static void destroy_inodecache(void) {
 
 static void baby_put_super(struct super_block *sb) {
   struct baby_sb_info *baby_sb_info = BABY_SB(sb);
+  struct baby_super_block *raw_sb = baby_sb_info->s_babysb;
+  baby_sync_super(baby_sb_info, raw_sb, 1);
   if (baby_sb_info == NULL) {
     return;
   }

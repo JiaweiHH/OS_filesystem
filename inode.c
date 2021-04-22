@@ -565,7 +565,7 @@ int __baby_write_inode(struct inode *inode, int do_sync) {
   }
 
   mark_buffer_dirty(bh);
-  if (do_sync == WB_SYNC_ALL) { // 支持同步写
+  if (do_sync) { // 支持同步写
     sync_dirty_buffer(bh);
     if (buffer_req(bh) && !buffer_uptodate(bh))
       ret = -EIO;
@@ -609,6 +609,8 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
 
   baby_set_bit(i_no, bh_bitmap->b_data); // 占用这一位
   mark_buffer_dirty(bh_bitmap);
+  if (sb->s_flags & SB_SYNCHRONOUS)
+    sync_dirty_buffer(bh_bitmap);
   brelse(bh_bitmap);
 
   // 设置 inode 的属性
@@ -969,6 +971,8 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
     // printk("baby_free_blocks：first_zero_bit: %d\n", i_no);
 
     mark_buffer_dirty(bitmap_bh);
+    if (sb->s_flags & SB_SYNCHRONOUS)
+      sync_dirty_buffer(bitmap_bh);
     brelse(bitmap_bh);
 
     count -= nr_del_bit; // 还剩多少bit要清除
@@ -1127,6 +1131,8 @@ void baby_free_inode(struct inode *inode) {
   bitmap_bh = sb_bread(inode->i_sb, BABYFS_INODE_BIT_MAP_BLOCK_BASE);
   baby_clear_bit(inode->i_ino, bitmap_bh->b_data);
   mark_buffer_dirty(bitmap_bh);
+  if (inode->i_sb->s_flags & SB_SYNCHRONOUS)
+    sync_dirty_buffer(bitmap_bh);
   brelse(bitmap_bh);
 }
 
