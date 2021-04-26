@@ -4,12 +4,12 @@
 
 #include "babyfs.h"
 
-void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn) {
-  printk("%s dump_myrsv: start %lu end %lu size %d hit %d\n", fn,
-         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_goal_size,
-         my_rsv->rsv_alloc_hit);
+void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn, int line) {
+  printk("%s[%d] dump_myrsv: [%lu, %lu] %d/%d \n", fn, line,
+         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_alloc_hit,
+         my_rsv->rsv_goal_size);
 }
-#define dump_myrsv(rsv) __dump_myrsv(rsv, __func__)
+#define dump_myrsv(rsv) __dump_myrsv(rsv, __func__, __LINE__)
 
 /*
  * 预留窗口操作函数，操作功能包括：
@@ -387,7 +387,7 @@ retry:
           my_rsv->rsv_start - bitmap_no_1 * BABYFS_BIT_PRE_BLOCK,
           BABYFS_BIT_PRE_BLOCK, *((char *)(bh[0]->b_data) + (first_free_block > 0 ? first_free_block : 0) / 8));
   #endif
-  if (first_free_block > 0) {
+  if (first_free_block >= 0) {
     // 更新 start_block
     start_block = first_free_block + bitmap_no_1 * BABYFS_BIT_PRE_BLOCK;
     // 判断 free block 是不是在 rsv 内
@@ -408,7 +408,7 @@ retry:
           first_free_block, BABYFS_BIT_PRE_BLOCK, 
           *((char *)(bh[0]->b_data) + (first_free_block > 0 ? first_free_block : 0) / 8));
     #endif
-    if (first_free_block > 0) {
+    if (first_free_block >= 0) {
       // 更新 start_block
       start_block = first_free_block + bitmap_no_2 * BABYFS_BIT_PRE_BLOCK;
       // 判断 free block 是不是在 rsv 内
@@ -616,7 +616,7 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
   #ifdef RSV_DEBUG
     printk("baby_try_to_allocate: first < 0\n");  
   #endif
-    if (!has_next) {
+    if (!has_next) { // 在第一块中分配失败，且没有第二块
       goto fail;
     }
     /* 第一块失败，但是存在第二块的情况，继续往下执行 */
@@ -633,7 +633,7 @@ static baby_fsblk_t baby_try_to_allocate(struct super_block *sb,
   printk("baby_try_to_allocate next, remain %lu\n", remain);
 #endif
   int ret = do_allocate(bh[1], &remain, 0, my_rsv->_rsv_end % BABYFS_BIT_PRE_BLOCK + 1, 0, 1);
-  if(ret < 0)
+  if(ret < 0 && first < 0) // 第一和第二块都分配失败
     goto fail;
   num += remain;
   if(first < 0)
@@ -745,9 +745,7 @@ baby_try_to_allocate_with_rsv(struct super_block *sb, baby_fsblk_t goal,
     }
     // 将预留窗口中预分配的数据块，在其所属块组位图上对应的bit置1，即正式占用
     ret = baby_try_to_allocate(sb, goal, &num, &my_rsv->rsv_window, bh_array);
-  #ifdef RSV_DEBUG
-    printk("baby_try_to_allocate_with_rsv ret %lld\n", ret);
-  #endif
+
     if (ret >= 0) { // 如果分配成功，统计预留窗口中已分配数量后退出循环
       my_rsv->rsv_alloc_hit += num; // 统计预留窗口中已分配数量
       *count = num;                 // 返回分配到的块数
@@ -802,9 +800,6 @@ unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
     windowsz = my_rsv->rsv_goal_size;
   free_blocks = sb_info->nr_free_blocks;         // 系统剩余空闲数量
   
-#ifdef RSV_DEBUG
-  printk("baby_new_blocks: free_blocks %ld\n", free_blocks);
-#endif
 
 retry_alloc:
   // 没有剩余空间分配预留窗口了
