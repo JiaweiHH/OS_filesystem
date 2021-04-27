@@ -4,10 +4,10 @@
 
 #include "babyfs.h"
 
-void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn, int line) {
-  printk("%s[%d] dump_myrsv: [%lu, %lu] %d/%d \n", fn, line,
-         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_alloc_hit,
-         my_rsv->rsv_goal_size);
+void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn) {
+  printk("%s dump_myrsv: start %llu end %llu size %d hit %d\n", fn,
+         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_goal_size,
+         my_rsv->rsv_alloc_hit);
 }
 #define dump_myrsv(rsv) __dump_myrsv(rsv, __func__, __LINE__)
 
@@ -36,7 +36,7 @@ restart:
     rsv = rb_entry(n, struct baby_reserve_window_node, rsv_node);
     if (verbose)
       printk("reservation window 0x%p "
-             "start: %lu, end: %lu\n",
+             "start: %llu, end: %llu\n",
              rsv, rsv->rsv_start, rsv->rsv_end);
     if (rsv->rsv_start && rsv->rsv_start >= rsv->rsv_end) {
       printk("Bad reservation %p (start >= end)\n", rsv);
