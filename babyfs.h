@@ -157,13 +157,15 @@ struct baby_sb_info {
 	struct baby_reserve_window_node s_rsv_window_head;
 };
 
+#define PROC_FILE_NAMELEN 10
+
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
 struct baby_inode_info {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   struct inode vfs_inode;
   __u32 i_dtime;            /* 删除时间 */
-
+  char i_proc_name[PROC_FILE_NAMELEN];  /* proc fs 下面的文件名 */
   struct baby_block_alloc_info *i_block_alloc_info; // 每一个普通文件都有预留窗口，用来加速磁盘块分配
 };
 
@@ -171,6 +173,15 @@ struct baby_inode_info {
 static inline struct baby_inode_info *BABY_I(struct inode *inode) {
   return container_of(inode, struct baby_inode_info, vfs_inode);
 }
+
+/* proc.c */
+// 存储在 proc fs 的信息
+extern char proc_root_name[PROC_FILE_NAMELEN];
+extern struct proc_dir_entry *proc_root;
+extern void baby_init_proc_alloc_info(struct inode *);
+extern void baby_create_proc_file(struct inode *);
+extern void baby_remove_proc_entry(struct inode *);
+// void baby_remove_root_entry(void);
 
 /* dir.c */
 extern int baby_add_link(struct dentry *dentry, struct inode *inode);

@@ -26,11 +26,14 @@ void file_type_special_operation(struct inode *inode, umode_t mode) {
 
       // 普通文件的磁盘块分配使用预留窗口加速
       baby_init_block_alloc_info(inode);
+      // proc_fs 相关信息初始化
+      baby_init_proc_alloc_info(inode);
       break;
     case S_IFDIR:  // 目录文件
       inode->i_op = &baby_dir_inode_operations;
       inode->i_fop = &baby_dir_operations;
       inode->i_mapping->a_ops = &baby_aops;
+      baby_init_proc_alloc_info(inode);
       break;
     case S_IFLNK:  // 符号链接文件
       // TODO 支持快速符号链接
@@ -104,6 +107,7 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   vfs_inode->i_blocks = le32_to_cpu(raw_inode->i_blocknum);
   bbi->i_subdir_num = le16_to_cpu(raw_inode->i_subdir_num);
   bbi->i_block_alloc_info = NULL;
+  // bbi->i_proc_info = NULL;
   for (i = 0; i < BABYFS_N_BLOCKS; i++) { // 拷贝数据块索引数组
     bbi->i_blocks[i] = raw_inode->i_blocks[i];
   }
@@ -112,6 +116,9 @@ struct inode *baby_iget(struct super_block *sb, unsigned long ino) {
   // 根据文件类型执行特定操作
   file_type_special_operation(vfs_inode, vfs_inode->i_mode);
 
+  /* 根据 ino 选择创建目录或者文件 */
+  baby_create_proc_file(vfs_inode);
+    
   brelse(bh);
   unlock_new_inode(vfs_inode);
   return vfs_inode;
@@ -622,6 +629,7 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
   bbi->i_subdir_num = 0;
   bbi->i_block_alloc_info = NULL;
+  // bbi->i_proc_info = NULL;
   // bbi->i_blocks[0] = i_no + NR_DSTORE_BLOCKS; // 新 inode 的第一个数据块号
   memset(bbi->i_blocks, 0, sizeof(bbi->i_blocks)); // 初始化索引数组
   // 将新申请的 vfs inode 添加到inode cache 的 hash 表中，
@@ -634,6 +642,9 @@ struct inode *baby_new_inode(struct inode *dir, umode_t mode,
   }
   // 根据文件类型执行特定操作
   file_type_special_operation(inode, inode->i_mode);
+
+  /* 根据 ino 选择创建目录或者文件 */
+  baby_create_proc_file(inode);
 
   mark_inode_dirty(inode);
 
@@ -986,9 +997,9 @@ void baby_free_blocks(struct inode *inode, unsigned long block,
  * @p: 索引数组开始的位置
  * @q: 索引数组结束的位置
  */
-static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
+static inline void baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
   unsigned long block_to_free = 0, count = 0, nr;
-  struct baby_sb_info *sb_info = BABY_SB(inode->i_sb);
+  // struct baby_sb_info *sb_info = BABY_SB(inode->i_sb);
   for (; p < q; ++p) {
     nr = le32_to_cpu(*p);
     if (nr) {
@@ -1022,7 +1033,7 @@ static inline baby_free_data(struct inode *inode, __le32 *p, __le32 *q) {
 static void baby_free_branches(struct inode *inode, __le32 *p, __le32 *q,
                                int depth) {
   struct buffer_head *bh;
-  struct baby_sb_info *sb_info = BABY_SB(inode->i_sb);
+  // struct baby_sb_info *sb_info = BABY_SB(inode->i_sb);
   unsigned long nr;
   unsigned long address_num_per_block =
       BABYFS_BLOCK_SIZE / sizeof(__u32); // 每个磁盘块中可以表示的 块号的数量
@@ -1166,9 +1177,13 @@ void baby_evict_inode(struct inode *inode) {
 	baby_discard_reservation(inode);
 	rsv = inode_info->i_block_alloc_info;
 	inode_info->i_block_alloc_info = NULL;
+
+  /* 释放 proc 相关结构 */
+  baby_remove_proc_entry(inode);
+  // inode_info->i_proc_info = NULL;
 	if (unlikely(rsv))
 		kfree(rsv);
-  
+
   if (want_delete) {
     baby_free_inode(inode); // 释放 inode
     sb_info->nr_free_inodes++;

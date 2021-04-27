@@ -4,6 +4,7 @@
 #include <linux/mm.h>
 #include <linux/blkdev.h>
 #include <linux/statfs.h>
+#include <linux/proc_fs.h>
 
 #include "babyfs.h"
 
@@ -206,6 +207,8 @@ static void baby_put_super(struct super_block *sb) {
   brelse(baby_sb_info->s_sbh);
   sb->s_fs_info = NULL;
   kfree(baby_sb_info);
+  remove_proc_entry(proc_root_name, NULL);
+  // baby_remove_root_entry();
 }
 
 void baby_sync_super(struct baby_sb_info *sb_info, struct baby_super_block *raw_sb, int wait) {
