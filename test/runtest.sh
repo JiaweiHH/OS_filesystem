@@ -1,5 +1,7 @@
 #!/bin/bash
 
+. ./niceecho.sh
+
 # 这里只是调用所有指定测试用例的入口
 # 实际测试的方法由用户自定义给出，可以是sh、c，甚至是插装模块
 
@@ -10,16 +12,18 @@ dir=`pwd`
 for testsuit in ${testsuits[@]}
 do
   cd "$dir/$testsuit"
+
+  echoinfo "\n------->>>>>>> testsuit __${testsuit}__ start ------->>>>>>\n"
   
   bash ./main.sh
   if [ $? != 0 ]; then
-    echo "testsuit ${testsuit} failed!"
+    echoerr "<<<<<<<------- testsuit __${testsuit}__ failed! <<<<<<-----"
     exit -1
   fi
   
-  echo -e "\n----> testsuit * ${testsuit} * success! <----\n"
+  echosucc "<<<<<<<------- testsuit __${testsuit}__ success! <<<<<<----"
 
   cd $dir
 done
 
-echo -e "Congratulations!!! every thing is ok."
+echosucc "Congratulations!!! every thing is ok." 

@@ -232,4 +232,7 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
 #define baby_test_bit test_bit_le
 #endif
 
+// 输出信息函数名和行号信息
+#define bbprintk(fmt, args...) printk("%s:%d => " fmt, __func__, __LINE__, ##args)
+
 #endif

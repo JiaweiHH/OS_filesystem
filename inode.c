@@ -239,16 +239,16 @@ static unsigned long baby_find_near(struct inode *inode, Indirect *ind) {
     return ind->bh->b_blocknr;
   }
   // 再没有的话就随机返回一块
-  struct super_block *sb = inode->i_sb;
-  struct baby_sb_info *sb_info = BABY_SB(sb);
-  unsigned short bitmap_num = sb_info->nr_bitmap;
-  baby_fsblk_t first_block = NR_DSTORE_BLOCKS;
-  baby_fsblk_t colour = (current->pid % (16 * bitmap_num)) * (sb_info->nr_blocks / (16 * bitmap_num));
-#ifdef RSV_DEBUG
-  printk("first_block + colour: %ld\n", first_block + colour);
-#endif
-  return first_block + colour;
-  // return NR_DSTORE_BLOCKS + 1;
+//   struct super_block *sb = inode->i_sb;
+//   struct baby_sb_info *sb_info = BABY_SB(sb);
+//   unsigned short bitmap_num = sb_info->nr_bitmap;
+//   baby_fsblk_t first_block = NR_DSTORE_BLOCKS;
+//   baby_fsblk_t colour = (current->pid % (16 * bitmap_num)) * (sb_info->nr_blocks / (16 * bitmap_num));
+// #ifdef RSV_DEBUG
+//   printk("first_block + colour: %ld\n", first_block + colour);
+// #endif
+//   return first_block + colour;
+  return NR_DSTORE_BLOCKS + 1;
 }
 
 /*
