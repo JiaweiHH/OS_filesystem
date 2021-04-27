@@ -1,7 +1,7 @@
 #ifndef _INFORMATION_H
 #define _INFORMATION_H
 
-#include "babyfs.h"
+#include "../babyfs.h"
 
 /**
  * proc_write 协议:

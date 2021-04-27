@@ -4,7 +4,13 @@ babyfs-objs := inode.o super.o dir.o file.o balloc.o proc.o
 # CFLAGS_balloc.o += -DRSV_DEBUG
 # CFLAGS_inode.o += -DRSV_DEBUG
 # CFLAGS_inode.o += -DCLEAR_DEBUG
-# CFLAGS_proc.o += -DPROC_DEBUG
+CFLAGS_balloc.o += ${CFLAG_BALLOC}
+CFLAGS_inode.o += ${CFLAG_INODE}
+CFLAGS_proc.o += ${CFLAG_PROC}
+CFLAGS_super.o += ${CFLAG_SUPER}
+
+# make CFLAG_BALLOC=-DRSV_DEBUG CFLAG_INODE=-DRSV_DEBUG ...
+
 else
 KDIR:=/lib/modules/$(shell uname -r)/build
 all:

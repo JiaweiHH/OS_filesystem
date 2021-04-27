@@ -4,10 +4,10 @@
 
 #include "babyfs.h"
 
-void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn) {
-  printk("%s dump_myrsv: start %llu end %llu size %d hit %d\n", fn,
-         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_goal_size,
-         my_rsv->rsv_alloc_hit);
+void __dump_myrsv(struct baby_reserve_window_node *my_rsv, const char *fn, int line) {
+  printk("%s[%d] dump_myrsv: [%lu, %lu] %d/%d \n", fn, line,
+         my_rsv->rsv_start, my_rsv->rsv_end, my_rsv->rsv_alloc_hit,
+         my_rsv->rsv_goal_size);
 }
 #define dump_myrsv(rsv) __dump_myrsv(rsv, __func__, __LINE__)
 

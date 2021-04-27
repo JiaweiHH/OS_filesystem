@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "babyfs.h"
-#include "test_information.h"
+#include "../../babyfs.h"
+#include "../test_information.h"
 
 /**
  * 测试了创建两个文件的时候文件块的关系 以及 rsv 的基本信息
@@ -43,7 +43,7 @@ int32_t create_two_4blocks_file() {
   constexpr uint32_t count = 4;
   constexpr uint32_t sz = count * BABYFS_BLOCK_SIZE;
   for (int i = 1; i <= 2; ++i) {
-    std::string filename = "./imgdir/test_file_" + std::to_string(i);
+    std::string filename = "../../imgdir/test_file_" + std::to_string(i);
     vec_filename.push_back(filename);
     std::ofstream ostrm(filename);
     ostrm.fill(' ');
