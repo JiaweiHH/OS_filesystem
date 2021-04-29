@@ -1,16 +1,23 @@
 ifneq ($(KERNELRELEASE),)
 obj-m := babyfs.o
 babyfs-objs := inode.o super.o dir.o file.o balloc.o proc.o
-# CFLAGS_balloc.o += -DRSV_DEBUG
-# CFLAGS_inode.o += -DRSV_DEBUG
-# CFLAGS_inode.o += -DCLEAR_DEBUG
-CFLAGS_balloc.o += ${CFLAG_BALLOC}
-CFLAGS_inode.o += ${CFLAG_INODE}
+ifeq (${RSV_DEBUG}, y)
+CFLAGS_balloc.o += -DRSV_DEBUG
+CFLAGS_inode.o += -DRSV_DEBUG
+endif
+
+ifeq (${CLEAR_DEBUG}, y)
+CFLAGS_inode.o += -DCLEAR_DEBUG
+endif
+
+ifeq (${PROC_DEBUG}, y)
 CFLAGS_proc.o += ${CFLAG_PROC}
-CFLAGS_super.o += ${CFLAG_SUPER}
+endif
 
-# make CFLAG_BALLOC=-DRSV_DEBUG CFLAG_INODE=-DRSV_DEBUG ...
-
+ifeq (${CFLAG_SUPER}, y)
+CFLAGS_super.o += -DPROC_DEBUG
+endif
+ccflags-y += -w
 else
 KDIR:=/lib/modules/$(shell uname -r)/build
 all:
