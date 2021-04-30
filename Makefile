@@ -11,13 +11,14 @@ CFLAGS_inode.o += -DCLEAR_DEBUG
 endif
 
 ifeq (${PROC_DEBUG}, y)
-CFLAGS_proc.o += ${CFLAG_PROC}
+CFLAGS_proc.o += -DCFLAG_PROC
 endif
 
 ifeq (${CFLAG_SUPER}, y)
 CFLAGS_super.o += -DPROC_DEBUG
 endif
-ccflags-y += -w
+
+# ccflags-y += -w
 else
 KDIR:=/lib/modules/$(shell uname -r)/build
 all:
