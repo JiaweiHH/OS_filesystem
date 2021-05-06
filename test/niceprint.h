@@ -1,3 +1,4 @@
+#ifndef __cplusplus
 #include <stdio.h>
 
 // 通过printf设置Linux终端输出的颜色和显示
@@ -17,3 +18,12 @@
 #define bbwarning(fmt, args...) __bbprintf(YELLOW "\n", fmt "\n", ##args)
 #define bberr(fmt, args...) __bbprintf(RED "\n", fmt "\n", ##args)
 #define bbsucc(fmt, args...) __bbprintf_s(GREEN, fmt, ##args)
+
+#else
+#define NONE    "\033[0m"
+#define INFO    "\033[37m"
+#define ERR     "\033[31m"
+#define WARN  "\033[33m"
+#define SUCC   "\033[32m"
+
+#endif
