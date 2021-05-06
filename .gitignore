@@ -20,3 +20,5 @@
 !Makefile
 !*.sh
 !*.h
+
+*.mod.c
