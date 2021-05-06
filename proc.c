@@ -18,7 +18,7 @@
  * -l 获取 alloc_info
  *
  * -w -n [ino] -d [simple data name] data_value
- * [simple data name]: -g, goal;
+ * [simple data name]: -g;
  *
  * proc_read 协议：
  * 返回数据格式：根据参数的顺序，写入相应的结构体
