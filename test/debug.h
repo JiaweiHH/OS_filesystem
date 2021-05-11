@@ -41,6 +41,9 @@ private:
 } // namespace baby_test
 
 #else
+/**
+ * 使用：先初始化 log_file name，然后用 c_log 函数就可以了
+ */
 FILE *fp;
 char __log_name[20] = {0};
 void set_log_name(char *name) {
