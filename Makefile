@@ -14,6 +14,10 @@ ifeq (${PROC_DEBUG}, y)
 CFLAGS_proc.o += -DCFLAG_PROC
 endif
 
+ifneq (${LARGE_FILE}, y)
+CFLAGS_super.o += -DLARGE_FILE
+endif
+
 ifeq (${CFLAG_SUPER}, y)
 CFLAGS_super.o += -DPROC_DEBUG
 endif
