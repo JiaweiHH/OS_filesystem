@@ -1,24 +1,12 @@
-# *.o
-# *.ko
-# *.symvers
-# *.ko.cmd
-# *.o.cmd
-# *.img
-# *.mod.c
-# .cache.mk
-# .tmp_versions/
-# userspace_test
-# userspace_test.c
-# mkfs.babyfs
-# modules.order
-# .vscode/
-/*
-!.gitignore
-!*.cc
-!*.c
-!*.md
-!Makefile
-!*.sh
-!*.h
-
+*.o
+*.ko
+*.symvers
+*.ko.cmd
+*.o.cmd
+*.img
 *.mod.c
+.cache.mk
+.tmp_versions/
+userspace_test.c
+modules.order
+.vscode/

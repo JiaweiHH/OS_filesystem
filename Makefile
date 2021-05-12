@@ -24,7 +24,7 @@ KDIR:=/lib/modules/$(shell uname -r)/build
 all:
 	make -C $(KDIR) M=$(PWD) modules
 clean:
-	rm -f *.ko *.o *.mod.o *.mod.c *.symvers *.order mkfs.babyfs
+	rm -f *.ko *.o *.mod.o *.mod.c *.symvers *.order mkfs.babyfs && find . -type f -executable -exec sh -c "file -i '{}' | grep -q 'x-executable; charset=binary'" \; -print | xargs rm -f
 endif
 
 install:
