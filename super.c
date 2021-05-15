@@ -31,6 +31,12 @@ static long long baby_max_size(struct super_block *sb) {
   /* tripple indirect blocks */
   meta_blocks += 1 + (1LL << (bits-2)) + (1LL << (2*(bits-2)));
 
+  // 如果挂载的磁盘过小，就把磁盘容量当做最大文件大小，这可能会造成磁盘块分配失败
+  if(upper_limit < meta_blocks * 3) {
+    printk(KERN_WARNING "%s:%d => disk is too small, use disk capacity as unstable max file size!\n", __func__, __LINE__);
+    return upper_limit <<= bits;
+  }
+
   upper_limit -= meta_blocks; // 去掉索引块占用的数量
   upper_limit <<= bits;
 
@@ -85,11 +91,7 @@ static int babyfs_fill_super(struct super_block *sb, void *data, int silent) {
   baby_sb_info->last_bitmap_bits = baby_sb->nr_blocks % BABYFS_BIT_PRE_BLOCK;
   baby_sb_info->nr_bitmap = baby_sb->nr_dstore_blocks - baby_sb->nr_bfree_blocks;
   sb->s_fs_info = baby_sb_info; // superblock 的私有域存放额外信息，包括磁盘上的结构体
-  // TODO 测试小文件系统的时候需要注释掉最大文件限制，不然会报错
-  
-#ifdef LARGE_FILE
   sb->s_maxbytes = baby_max_size(sb); // 设置最大文件大小，在文件写入时起限制作用
-#endif
 
   /* per fileystem reservation list head & lock */
   spin_lock_init(&baby_sb_info->s_rsv_window_lock);
