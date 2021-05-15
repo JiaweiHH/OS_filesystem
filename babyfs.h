@@ -39,7 +39,7 @@
   (BABYFS_BLOCK_SIZE << 3)  // 每个 block 可以存放的位数
 #define BABYFS_INODE_TABLE_BLOCK_BASE \
   (BABYFS_INODE_BIT_MAP_BLOCK_BASE +  \
-   BABYFS_INODE_NUM_COUNTS / BABYFS_BIT_PRE_BLOCK)  // inode 表起始块号
+   (BABYFS_INODE_NUM_COUNTS + BABYFS_BIT_PRE_BLOCK - 1) / BABYFS_BIT_PRE_BLOCK)  // inode 表起始块号
 #define BABYFS_DATA_BIT_MAP_BLOCK_BASE \
   (BABYFS_INODE_TABLE_BLOCK_BASE + BABYFS_INODE_BLOCKS_NUM)  // 数据位图起始块号
 
@@ -78,21 +78,24 @@ struct baby_super_block {
   __le32 last_bitmap_bits; /* 最后一块block bitmap含有的有效bit位数 */
 };
 
-// 磁盘索引节点
+/* 
+ * 磁盘索引节点
+ * 字节对齐：1. 结构体的大小等于其最大成员的整数倍 2.结构体成员的首地址相对于结构体首地址的偏移量是其类型大小的整数倍
+ * 将大的数据放在前面可以避免字节对齐填充问题
+ */
 struct baby_inode {
-  __le16 i_mode;                    /* 文件类型和访问权限 */
-  __le16 i_uid;                     /* inode 所属用户编号 */
-  __le16 i_gid;                     /* inode 所属用户组编号 */
   __le64 i_size;                    /* inode 对应文件大小 */
   __le32 i_ctime;                   /* i_ctime */
   __le32 i_atime;                   /* i_atime */
   __le32 i_mtime;                   /* i_mtime */
   __le32 i_blocknum;                /* 文件块数 */
+  __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
+  __le16 i_mode;                    /* 文件类型和访问权限 */
+  __le16 i_uid;                     /* inode 所属用户编号 */
+  __le16 i_gid;                     /* inode 所属用户组编号 */
   __le16 i_nlink;                   /* 硬链接计数 */
   __le16 i_subdir_num;              /* 子目录项数量 */
-  __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
-  __u8 _padding[(BABYFS_INODE_SIZE -
-                 (4 + 2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
+  __u8 _padding[(BABYFS_INODE_SIZE - (4 + 2 * 3 + 4 * 5 + 2 * 2 + 4 * BABYFS_N_BLOCKS))]; /* inode 结构体扩展到 128B */
 };
 
 /*
@@ -108,13 +111,50 @@ struct dir_record {
 
 #ifdef __KERNEL__
 
+#define rsv_start rsv_window._rsv_start
+#define rsv_end rsv_window._rsv_end
+
+/* data type for filesystem-wide blocks number */
+typedef long long baby_fsblk_t;
+
+#define BABY_DEFAULT_RESERVE_BLOCKS     8
+/*max window size: 1024(direct blocks) + 3([t,d]indirect blocks) */
+#define BABY_MAX_RESERVE_BLOCKS         1027
+#define BABY_RESERVE_WINDOW_NOT_ALLOCATED 0
+struct baby_reserve_window {
+  baby_fsblk_t _rsv_start; /* 第一个预留的字节 */ 
+  baby_fsblk_t _rsv_end;	/* 最后一个预留的字节，或为0 */ 
+};
+
+struct baby_reserve_window_node {
+  struct rb_node rsv_node; // 预分配窗口的红黑树
+  __u32 rsv_goal_size; // 预分配的块数量
+  __u32 rsv_alloc_hit; // 跟踪预分配的命中数，即多少次分配是在预留窗口中进行的
+  struct baby_reserve_window rsv_window;
+};
+
+struct baby_block_alloc_info { // 用于跟踪文件的磁盘块分配信息
+  /* information about reservation window */
+  // 采用预分配策略，预分配有关信息
+  struct baby_reserve_window_node rsv_window_node;
+  baby_fsblk_t last_alloc_logical_block; // 上一次分配的逻辑块号
+  baby_fsblk_t last_alloc_physical_block; // 上一次分配的物理块号
+};
+
 struct baby_sb_info {
   struct baby_super_block *s_babysb;
   struct buffer_head *s_sbh;
   __le32 nr_free_blocks;
   __le32 nr_free_inodes;
-  __le32 nr_blocks;
+  __le32 nr_blocks; // 数据块数量
+  __le16 nr_bitmap; // bitmap 数量
   __le32 last_bitmap_bits; // 最后一块block bitmap含有的有效bit位数
+  
+  // 保护这个文件系统上预留窗口的锁
+  spinlock_t s_rsv_window_lock;
+	// 树根，文件系统下所有inode的预分配窗口被组织在这棵红黑树上
+  struct rb_root s_rsv_window_root;
+	struct baby_reserve_window_node s_rsv_window_head;
 };
 
 // 包含 vfs inode 的自定义 inode，存放对应于磁盘 inode 的额外信息
@@ -122,9 +162,9 @@ struct baby_inode_info {
   __le16 i_subdir_num;              /* 子目录项数量 */
   __le32 i_blocks[BABYFS_N_BLOCKS]; /* 索引数组 */
   struct inode vfs_inode;
-  __u32 i_next_alloc_block; /* 下一次分配文件内逻辑块号 */
-  __u32 i_next_alloc_goal;  /* 下一次分配物理块号 */
   __u32 i_dtime;            /* 删除时间 */
+
+  struct baby_block_alloc_info *i_block_alloc_info; // 每一个普通文件都有预留窗口，用来加速磁盘块分配
 };
 
 // 从 vfs inode 返回包含他的 baby_inode_info
@@ -167,6 +207,14 @@ extern unsigned long baby_count_free_blocks(struct super_block *sb);
 /* file.c */
 extern const struct file_operations baby_file_operations;
 
+/* balloc.c */
+extern unsigned long baby_new_blocks(struct inode *inode, unsigned long goal,
+                                     unsigned long *count, int *err);
+extern void baby_init_block_alloc_info(struct inode *inode);
+extern void baby_discard_reservation(struct inode *inode);
+extern void rsv_window_add(struct super_block *sb,
+                           struct baby_reserve_window_node *rsv);
+
 /* 获取超级块 */
 static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
   return sb->s_fs_info;
@@ -175,12 +223,13 @@ static inline struct baby_sb_info *BABY_SB(struct super_block *sb) {
 // 小端序位图操作方法
 // baby_find_next_zero_bit(void *map, unsigned long search_maxnum, unsigned long search_start)
 #define baby_set_bit __test_and_set_bit_le      // set 1，并返回原值
-#define baby_clear_bit __clear_bit_le  // set 0
 #define baby_test_bit test_bit_le
+#define baby_clear_bit	__test_and_clear_bit_le
 #define baby_find_first_zero_bit find_first_zero_bit_le
 #define baby_find_first_bit find_first_bit
 #define baby_find_next_zero_bit find_next_zero_bit_le
 #define baby_find_next_bit find_next_bit
+#define baby_test_bit test_bit_le
 #endif
 
 #endif

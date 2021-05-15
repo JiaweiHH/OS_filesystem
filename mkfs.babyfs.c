@@ -17,8 +17,9 @@ static int nr_dstore_blocks;  // 保存数据块起始块号
  * 这样就让数据块起始块向前移动一块，bitmap 减少一块；浪费一块数据块
  */
 void optimize_bitmap_datablock(u_int32_t *nr_bfree_blocks, u_int32_t *nr_dstore_blocks, u_int32_t *nr_blocks) {
-  if(*nr_dstore_blocks - *nr_bfree_blocks > ((*nr_blocks + BABYFS_BLOCK_SIZE << 3 - 1) / (BABYFS_BLOCK_SIZE << 3))) {
+  if(*nr_dstore_blocks - *nr_bfree_blocks > ((*nr_blocks + (BABYFS_BLOCK_SIZE << 3) - 1) / (BABYFS_BLOCK_SIZE << 3))) {
     (*nr_dstore_blocks)--;
+    (*nr_blocks)--;
   }
   return;
 }
@@ -36,12 +37,15 @@ static void write_superblock(u_int64_t file_size) {
   super_block->nr_inodes = BABYFS_INODE_BLOCKS_NUM;  // inode 块数
   super_block->nr_istore_blocks =
       BABYFS_INODE_TABLE_BLOCK_BASE;  // inode 表起始块号
+  printf("inode table start: %d\n", super_block->nr_istore_blocks);
   super_block->nr_ifree_blocks =
       BABYFS_INODE_BIT_MAP_BLOCK_BASE;  // inode 位图起始块号
+  printf("inode bitmap start: %d\n", super_block->nr_ifree_blocks);
   super_block->nr_bfree_blocks =
       BABYFS_DATA_BIT_MAP_BLOCK_BASE;  // 数据块位图起始块号
+  printf("data bitmap start: %d\n", super_block->nr_bfree_blocks);
   super_block->nr_dstore_blocks =
-      (total_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE) /
+      (total_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE + BABYFS_BIT_PRE_BLOCK - 1) /
           (BABYFS_BLOCK_SIZE << 3) +
       BABYFS_DATA_BIT_MAP_BLOCK_BASE;  // 数据块起始块号。简单起见，但是这样计算有一点误差
   nr_dstore_blocks = super_block->nr_dstore_blocks;
@@ -53,9 +57,11 @@ static void write_superblock(u_int64_t file_size) {
   super_block->nr_free_inodes = BABYFS_INODE_NUM_COUNTS;  // inode 剩余空闲数量
   super_block->nr_free_blocks =
       super_block->nr_blocks;  // data block 剩余空闲数量
-  printf("bitmap_start = %ld, datablock_start = %ld\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE, super_block->nr_dstore_blocks);
+  super_block->nr_free_blocks--;  // 根目录的数据
+  printf("bitmap_start = %d, datablock_start = %d, total free blocks = %d\n", BABYFS_DATA_BIT_MAP_BLOCK_BASE, super_block->nr_dstore_blocks, super_block->nr_free_blocks);
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("超级块写入出错!\n");
     return;
   }
@@ -81,6 +87,7 @@ static void write_inode_table() {
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   // count++;
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("inode_table: 0, 写出错!\n");
     return;
   }
@@ -90,6 +97,7 @@ static void write_inode_table() {
   for (int i = 1; i < BABYFS_INODE_BLOCKS_NUM; ++i) {
     // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+      free(block);
       fprintf(stderr, "inode_table: %d, 写出错!\n", i);
       return;
     }
@@ -123,6 +131,7 @@ static void write_inode_bitmap() {
     ret = write(fd, inode_bitmap,
                 BABYFS_BLOCK_SIZE);  // 文件指针每次写完会自动往下一个块大小
     if (ret != BABYFS_BLOCK_SIZE) {
+      free(block);
       fprintf(stderr, "inode_bitmap: %d 写出错\n", i);
       return;
     }
@@ -143,6 +152,7 @@ static void write_datablock_bitmap() {
   // count++;
   // printf("write_datablock_bitmap: %d\n", count);
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("data_block_bitmap: 0, 写出错!\n");
     return;
   }
@@ -152,6 +162,7 @@ static void write_datablock_bitmap() {
   for (int i = 1; i < nr_dstore_blocks - BABYFS_DATA_BIT_MAP_BLOCK_BASE; ++i) {
     // count++;
     if (ret = write(fd, block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+      free(block);
       fprintf(stderr, "data_block_bitmap: %d, 写出错!\n", i);
       return;
     }
@@ -182,10 +193,11 @@ static void write_first_datablock() {
                            // BABYFS_INODE_TABLE_BLOCK_BASE 找到 inode block
   d_record->name_len = 2;
   d_record->file_type = BABYFS_FILE_TYPE_DIR;
-
+  
   // 写入目录项
   int ret = write(fd, block, BABYFS_BLOCK_SIZE);
   if (ret != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror(". 目录项写入出错!\n");
     return;
   }
@@ -195,6 +207,7 @@ static void write_first_datablock() {
         SEEK_SET);  // 从头开始移动偏移量
   char *inode_block = malloc(BABYFS_BLOCK_SIZE);
   if (ret = read(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("读取 inode 数据出错!\n");
     return;
   }
@@ -205,6 +218,7 @@ static void write_first_datablock() {
   // 写入数据
   lseek(fd, BABYFS_INODE_TABLE_BLOCK_BASE * BABYFS_BLOCK_SIZE, SEEK_SET);
   if (ret = write(fd, inode_block, BABYFS_BLOCK_SIZE) != BABYFS_BLOCK_SIZE) {
+    free(block);
     perror("写入 inode 数据出错!\n");
     return;
   }
