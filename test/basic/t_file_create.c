@@ -19,7 +19,7 @@
 int test_file_create(int testimg);
 
 int main() {
-  bbinfo("testcase file\n");
+  bbinfo("testcase: create file\n");
 
   int testimg; // 二进制文件
 
@@ -195,4 +195,5 @@ int test_file_create(int testimg) {
   }
   
   bbsucc("create file(f31) after remove(f3,f7) success\n");
+  return 0;
 }

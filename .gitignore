@@ -10,3 +10,4 @@
 userspace_test.c
 modules.order
 .vscode/
+*.log

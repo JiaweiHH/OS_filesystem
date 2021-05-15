@@ -1,5 +1,19 @@
 #!/bin/bash
 
+dir=`pwd`
+logfile="${dir}/test.log"
+# 将已有的日志文件删除
+if [ -f $logfile ]; then
+  rm -f ${logfile}
+  # 记录本次测试的开始时间
+  echo "TEST TIME: `date`" >> ${logfile}
+  # 记录本次测试的版本信息，模块的hash值可作为唯一的版本信息
+  echo "TEST VERSION: `md5sum ../babyfs.ko`" >> ${logfile}
+  # 
+  echo "PLATFORM: `uname -a`" >> ${logfile}
+  echo "USER: `whoami`" >> ${logfile}
+fi
+
 . ./niceecho.sh
 
 # 这里只是调用所有指定测试用例的入口
@@ -7,7 +21,6 @@
 
 # 将要执行的测试集
 testsuits=( "basic" "usec" )
-dir=`pwd`
 
 for testsuit in ${testsuits[@]}
 do
@@ -15,7 +28,7 @@ do
 
   echoinfo "\n------->>>>>>> testsuit __${testsuit}__ start ------->>>>>>\n"
   
-  bash ./main.sh
+  bash ./main.sh ${logfile}
   if [ $? != 0 ]; then
     echoerr "<<<<<<<------- testsuit __${testsuit}__ failed! <<<<<<-----"
     exit -1
